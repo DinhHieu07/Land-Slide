@@ -1,0 +1,806 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { authenticatedFetch } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Trash, Pencil, Filter, KeyRound, Shield } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { useAuth } from "@/hooks/useAuth";
+import { Account } from "@/types/account";
+import { Toast, ToastSeverity } from "@/components/Toast";
+import { cn } from "@/lib/utils";
+import Header from "./Header";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+const roleColor: Record<Account["role"], string> = {
+    admin: "bg-blue-100 text-blue-800",
+    superAdmin: "bg-purple-100 text-purple-800",
+};
+
+const roleLabel: Record<Account["role"], string> = {
+    admin: "Admin",
+    superAdmin: "SuperAdmin",
+};
+
+export default function AccountManagement() {
+    const { isAuthenticated, isSuperAdmin, loading, user } = useAuth();
+    const [accounts, setAccounts] = useState<Account[]>([]);
+    const [search, setSearch] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
+    const [roleFilter, setRoleFilter] = useState("all");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [openDialog, setOpenDialog] = useState(false);
+    const [openResetPasswordDialog, setOpenResetPasswordDialog] = useState(false);
+    const [openChangeRoleDialog, setOpenChangeRoleDialog] = useState(false);
+    const [editing, setEditing] = useState<Account | null>(null);
+    const [form, setForm] = useState({
+        username: "",
+        password: "",
+        role: "admin" as Account["role"],
+    });
+    const [resetPasswordForm, setResetPasswordForm] = useState({
+        newPassword: "",
+        confirmPassword: "",
+    });
+    const [changeRoleForm, setChangeRoleForm] = useState({
+        role: "admin" as Account["role"],
+    });
+    const [toastOpen, setToastOpen] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
+    const [toastSeverity, setToastSeverity] = useState<ToastSeverity>("success");
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmAccountId, setConfirmAccountId] = useState<number | null>(null);
+    const [page, setPage] = useState(1);
+    const pageSize = 10;
+    const [totalAccounts, setTotalAccounts] = useState(0);
+    const [loadingAccounts, setLoadingAccounts] = useState(true);
+    const [accountsError, setAccountsError] = useState<string | null>(null);
+
+    const fetchAccounts = async () => {
+        const params = new URLSearchParams();
+        if (debouncedSearch) params.append("search", debouncedSearch);
+        if (roleFilter && roleFilter !== "all") params.append("role", roleFilter);
+        params.append("limit", String(pageSize));
+        params.append("offset", String((page - 1) * pageSize));
+
+        setLoadingAccounts(true);
+        setAccountsError(null);
+
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/accounts?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                setAccounts(data.data || []);
+                setTotalAccounts(data.pagination?.total ?? data.data?.length ?? 0);
+            } else {
+                console.warn("Lỗi khi lấy danh sách tài khoản", data);
+                setAccounts([]);
+                setTotalAccounts(0);
+                setAccountsError(data?.message || "Không thể tải dữ liệu tài khoản.");
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách tài khoản", error);
+            setAccounts([]);
+            setTotalAccounts(0);
+            setAccountsError("Không thể tải dữ liệu tài khoản.");
+        } finally {
+            setLoadingAccounts(false);
+        }
+    };
+
+    // Debounce search đợi 500ms sau khi ngừng nhập
+    useEffect(() => {
+        const timeoutId = setTimeout(() => {
+            setDebouncedSearch(search);
+        }, 500);
+
+        return () => clearTimeout(timeoutId);
+    }, [search]);
+
+    useEffect(() => {
+        if (isAuthenticated && isSuperAdmin) {
+            fetchAccounts();
+        }
+    }, [isAuthenticated, isSuperAdmin, debouncedSearch, page, roleFilter]);
+
+    const handleSubmit = async () => {
+        if (!form.username || (!editing && !form.password)) {
+            setToastMessage("Vui lòng điền đầy đủ thông tin");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        if (!editing && form.password.length < 6) {
+            setToastMessage("Mật khẩu phải có ít nhất 6 ký tự");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const payload: any = {
+                username: form.username,
+                role: form.role,
+            };
+
+            if (!editing) {
+                payload.password = form.password;
+            }
+
+            const url = editing
+                ? `${API_URL}/api/accounts/${editing.id}`
+                : `${API_URL}/api/accounts`;
+            const method = editing ? "PUT" : "POST";
+
+            const res = await authenticatedFetch(url, {
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setOpenDialog(false);
+                setEditing(null);
+                setForm({
+                    username: "",
+                    password: "",
+                    role: "admin",
+                });
+                setToastMessage(editing ? "Cập nhật tài khoản thành công" : "Tạo tài khoản thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+                fetchAccounts();
+            } else {
+                setToastMessage(data?.message || "Lỗi lưu tài khoản");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (err) {
+            console.error(err);
+            setToastMessage("Lỗi kết nối máy chủ");
+            setToastSeverity("error");
+            setToastOpen(true);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleEdit = (account: Account) => {
+        setEditing(account);
+        setForm({
+            username: account.username,
+            password: "",
+            role: account.role,
+        });
+        setOpenDialog(true);
+    };
+
+    const handleDelete = async (accountId: number) => {
+        const res = await authenticatedFetch(`${API_URL}/api/accounts/${accountId}`, {
+            method: "DELETE",
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            setAccounts(accounts.filter((a) => a.id !== accountId));
+            setToastMessage("Xóa tài khoản thành công");
+            setToastSeverity("success");
+            setToastOpen(true);
+            setConfirmOpen(false);
+            setConfirmAccountId(null);
+            fetchAccounts();
+        } else {
+            setToastMessage(data?.message || "Xóa thất bại");
+            setToastSeverity("error");
+            setToastOpen(true);
+            setConfirmOpen(false);
+            setConfirmAccountId(null);
+        }
+    };
+
+    const handleResetPassword = async () => {
+        if (!resetPasswordForm.newPassword || resetPasswordForm.newPassword.length < 6) {
+            setToastMessage("Mật khẩu mới phải có ít nhất 6 ký tự");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
+            setToastMessage("Mật khẩu xác nhận không khớp");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const res = await authenticatedFetch(
+                `${API_URL}/api/accounts/${editing?.id}/reset-password`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        newPassword: resetPasswordForm.newPassword,
+                    }),
+                }
+            );
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setOpenResetPasswordDialog(false);
+                setResetPasswordForm({
+                    newPassword: "",
+                    confirmPassword: "",
+                });
+                setToastMessage("Đặt lại mật khẩu thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+            } else {
+                setToastMessage(data?.message || "Đặt lại mật khẩu thất bại");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (err) {
+            console.error(err);
+            setToastMessage("Lỗi kết nối máy chủ");
+            setToastSeverity("error");
+            setToastOpen(true);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleChangeRole = async () => {
+        setIsSubmitting(true);
+        try {
+            const res = await authenticatedFetch(
+                `${API_URL}/api/accounts/${editing?.id}/change-role`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        role: changeRoleForm.role,
+                    }),
+                }
+            );
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setOpenChangeRoleDialog(false);
+                setChangeRoleForm({
+                    role: "admin",
+                });
+                setToastMessage("Thay đổi role thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+                fetchAccounts();
+            } else {
+                setToastMessage(data?.message || "Thay đổi role thất bại");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (err) {
+            console.error(err);
+            setToastMessage("Lỗi kết nối máy chủ");
+            setToastSeverity("error");
+            setToastOpen(true);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const totalPages = Math.max(1, Math.ceil((totalAccounts || 0) / pageSize));
+    const paginated = accounts;
+
+    useEffect(() => {
+        setPage(1);
+    }, [search, roleFilter]);
+
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+
+    // Trạng thái loading spinner
+    if (loading || loadingAccounts) {
+        return (
+            <div className="p-6 flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Đang tải dữ liệu...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!isAuthenticated || !isSuperAdmin) {
+        return (
+            <div className="p-6">
+                <div className="rounded-lg border bg-white p-6 shadow-sm">
+                    <p className="text-red-600 font-semibold">
+                        Bạn cần quyền Super Admin để truy cập trang này.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    // Không thể tải dữ liệu
+    if (!loadingAccounts && accountsError) {
+        return (
+            <div className="p-6">
+                <div className="rounded-lg border bg-white p-6 shadow-sm">
+                    <p className="text-gray-600">Không thể tải dữ liệu tài khoản.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-2">
+                    <h1 className="text-3xl font-bold">Quản lý tài khoản</h1>
+                    <p className="text-sm text-muted-foreground">
+                        Quản lý người dùng, phân quyền và bảo mật hệ thống.
+                    </p>
+                </div>
+                <Header />
+            </div>
+            <div className="flex justify-end">
+                <Dialog
+                    open={openDialog}
+                    onOpenChange={(open) => {
+                        setOpenDialog(open);
+                        if (!open) {
+                            setEditing(null);
+                            setForm({
+                                username: "",
+                                password: "",
+                                role: "admin",
+                            });
+                        }
+                    }}
+                >
+                    <DialogTrigger asChild>
+                        <Button
+                            className="self-end"
+                            onClick={() => {
+                                setEditing(null);
+                                setForm({
+                                    username: "",
+                                    password: "",
+                                    role: "admin",
+                                });
+                            }}
+                        >
+                            Thêm tài khoản
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>
+                                {editing ? "Chỉnh sửa tài khoản" : "Thêm tài khoản"}
+                            </DialogTitle>
+                            <DialogDescription>Nhập thông tin tài khoản.</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-3">
+                            <div>
+                                <Label>Tên đăng nhập</Label>
+                                <Input
+                                    value={form.username}
+                                    onChange={(e) =>
+                                        setForm({ ...form, username: e.target.value })
+                                    }
+                                    placeholder="Nhập tên đăng nhập"
+                                />
+                            </div>
+                            {!editing && (
+                                <div>
+                                    <Label>Mật khẩu</Label>
+                                    <Input
+                                        type="password"
+                                        value={form.password}
+                                        onChange={(e) =>
+                                            setForm({ ...form, password: e.target.value })
+                                        }
+                                        placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)"
+                                    />
+                                </div>
+                            )}
+                            <div>
+                                <Label>Vai trò</Label>
+                                <Select
+                                    value={form.role}
+                                    onValueChange={(value: Account["role"]) =>
+                                        setForm({ ...form, role: value })
+                                    }
+                                >
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Chọn vai trò" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="admin">Quản trị viên</SelectItem>
+                                        <SelectItem value="superAdmin">Siêu quản trị</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button onClick={handleSubmit} disabled={isSubmitting}>
+                                {isSubmitting ? "Đang lưu..." : "Lưu"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            </div>
+
+            <div className="rounded-lg border bg-white p-4 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-end gap-3">
+                    <div className="flex-1">
+                        <Label>Tìm kiếm (tên đăng nhập)</Label>
+                        <Input
+                            value={search}
+                            onChange={(e) => {
+                                setSearch(e.target.value);
+                                setPage(1);
+                            }}
+                            placeholder="Nhập tên đăng nhập"
+                        />
+                    </div>
+                    <div className="w-full md:w-40 space-y-1.5">
+                        <Label>Vai trò</Label>
+                        <Select
+                            value={roleFilter}
+                            onValueChange={(value) => setRoleFilter(value)}
+                        >
+                            <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Tất cả" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="admin">Quản trị viên</SelectItem>
+                                <SelectItem value="superAdmin">Siêu quản trị</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <Button onClick={fetchAccounts}>
+                        <Filter className="size-4 mr-2" />
+                        Lọc
+                    </Button>
+                </div>
+            </div>
+
+            <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                                    Người dùng
+                                </th>
+                                <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                                    Tên đăng nhập
+                                </th>
+                                <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                                    Vai trò
+                                </th>
+                                <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                                    Ngày tạo
+                                </th>
+                                <th className="px-6 py-3 text-left font-semibold text-gray-700">
+                                    Hành động
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {paginated.length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
+                                        Không có dữ liệu
+                                    </td>
+                                </tr>
+                            )}
+                            {paginated.map((account) => (
+                                <tr key={account.id} className="border-t">
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-3">
+                                            <Avatar>
+                                                <AvatarImage src={account.avatar} />
+                                                <AvatarFallback>
+                                                    {account.username.charAt(0).toUpperCase()}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            <span className="font-medium text-gray-900">
+                                                {account.username}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-700">{account.username}</td>
+                                    <td className="px-4 py-3">
+                                        <span
+                                            className={cn(
+                                                "inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold",
+                                                roleColor[account.role]
+                                            )}
+                                        >
+                                            {roleLabel[account.role]}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-700">
+                                        {account.created_at
+                                            ? new Date(account.created_at).toLocaleString("vi-VN")
+                                            : "N/A"}
+                                    </td>
+                                    <td className="px-4 py-3 text-left space-x-2">
+                                        {account.id !== user?.id && (
+                                            <>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setEditing(account);
+                                                        setChangeRoleForm({ role: account.role });
+                                                        setOpenChangeRoleDialog(true);
+                                                    }}
+                                                >
+                                                    <Shield className="size-4" />
+                                                    Đổi role
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setEditing(account);
+                                                        setOpenResetPasswordDialog(true);
+                                                    }}
+                                                >
+                                                    <KeyRound className="size-4" />
+                                                    Đặt lại mật khẩu
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleEdit(account)}
+                                                >
+                                                    <Pencil className="size-4" />
+                                                    Sửa
+                                                </Button>
+                                                <Separator
+                                                    orientation="vertical"
+                                                    className="inline-block h-4 align-middle"
+                                                />
+                                                <Button
+                                                    variant="destructive"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setConfirmAccountId(account.id);
+                                                        setConfirmOpen(true);
+                                                    }}
+                                                >
+                                                    <Trash className="size-4" />
+                                                    Xóa
+                                                </Button>
+                                            </>
+                                        )}
+                                        {account.id === user?.id && (
+                                            <span className="text-sm text-gray-500 italic">
+                                                Tài khoản của bạn
+                                            </span>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">
+                    Hiển thị {paginated.length === 0 ? 0 : (page - 1) * pageSize + 1}-
+                    {Math.min(page * pageSize, totalAccounts)} / {totalAccounts} tài khoản
+                </p>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage(1)}
+                        disabled={page === 1}
+                    >
+                        Đầu
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                    >
+                        Trước
+                    </Button>
+                    <div className={cn("px-3 py-1 rounded-md border text-sm", "bg-white")}>
+                        Trang {page} / {totalPages}
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={page === totalPages}
+                    >
+                        Tiếp
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage(totalPages)}
+                        disabled={page === totalPages}
+                    >
+                        Cuối
+                    </Button>
+                </div>
+            </div>
+
+            {/* Dialog xác nhận xóa */}
+            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Xóa tài khoản</DialogTitle>
+                        <DialogDescription>
+                            Bạn có chắc chắn muốn xóa tài khoản này không? Hành động này không thể
+                            hoàn tác.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmOpen(false)}>Hủy</Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => handleDelete(confirmAccountId || 0)}
+                        >
+                            Xóa
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog đặt lại mật khẩu */}
+            <Dialog
+                open={openResetPasswordDialog}
+                onOpenChange={(open) => {
+                    setOpenResetPasswordDialog(open);
+                    if (!open) {
+                        setResetPasswordForm({
+                            newPassword: "",
+                            confirmPassword: "",
+                        });
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Đặt lại mật khẩu</DialogTitle>
+                        <DialogDescription>
+                            Đặt lại mật khẩu cho tài khoản: {editing?.username}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div>
+                            <Label>Mật khẩu mới</Label>
+                            <Input
+                                type="password"
+                                value={resetPasswordForm.newPassword}
+                                onChange={(e) =>
+                                    setResetPasswordForm({
+                                        ...resetPasswordForm,
+                                        newPassword: e.target.value,
+                                    })
+                                }
+                                placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)"
+                            />
+                        </div>
+                        <div>
+                            <Label>Xác nhận mật khẩu</Label>
+                            <Input
+                                type="password"
+                                value={resetPasswordForm.confirmPassword}
+                                onChange={(e) =>
+                                    setResetPasswordForm({
+                                        ...resetPasswordForm,
+                                        confirmPassword: e.target.value,
+                                    })
+                                }
+                                placeholder="Nhập lại mật khẩu mới"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setOpenResetPasswordDialog(false)}>Hủy</Button>
+                        <Button onClick={handleResetPassword} disabled={isSubmitting}>
+                            {isSubmitting ? "Đang xử lý..." : "Đặt lại"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog thay đổi role */}
+            <Dialog
+                open={openChangeRoleDialog}
+                onOpenChange={(open) => {
+                    setOpenChangeRoleDialog(open);
+                    if (!open) {
+                        setChangeRoleForm({
+                            role: "admin",
+                        });
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Thay đổi vai trò</DialogTitle>
+                        <DialogDescription>
+                            Thay đổi vai trò cho tài khoản: {editing?.username}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div>
+                            <Label>Vai trò</Label>
+                            <Select
+                                value={changeRoleForm.role}
+                                onValueChange={(value: Account["role"]) =>
+                                    setChangeRoleForm({ role: value })
+                                }
+                            >
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Chọn vai trò" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="admin">Quản trị viên</SelectItem>
+                                    <SelectItem value="superAdmin">Siêu quản trị</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setOpenChangeRoleDialog(false)}>Hủy</Button>
+                        <Button onClick={handleChangeRole} disabled={isSubmitting}>
+                            {isSubmitting ? "Đang xử lý..." : "Thay đổi"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Toast
+                open={toastOpen}
+                message={toastMessage}
+                severity={toastSeverity}
+                onClose={() => setToastOpen(false)}
+            />
+        </div>
+    );
+}
+

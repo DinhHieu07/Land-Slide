@@ -58,3 +58,4 @@ dist/
 build/
 *.tsbuildinfo
 
+backend/migrations/

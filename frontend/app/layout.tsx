@@ -4,6 +4,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AppSidebar from "@/components/Sidebar";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ResponsiveTrigger } from "@/components/ResponsiveTriggerSidebar";
+import { SocketProvider } from "@/contexts/SocketContext";
 
 export const metadata: Metadata = {
   title: "Landslide Management System",
@@ -19,13 +20,15 @@ export default function RootLayout({
     <html lang="en">
       <body suppressHydrationWarning={true}>
         <AuthProvider>
-          <SidebarProvider>
-            <AppSidebar />
-            <main className="relative min-h-screen w-full h-full">
-              <ResponsiveTrigger />
-              {children}
-            </main>
-          </SidebarProvider>
+          <SocketProvider>
+            <SidebarProvider>
+              <AppSidebar />
+              <main className="relative min-h-screen w-full h-full">
+                <ResponsiveTrigger />
+                {children}
+              </main>
+            </SidebarProvider>
+          </SocketProvider>
         </AuthProvider>
       </body>
     </html>

@@ -6,9 +6,14 @@ export interface Device {
     lat: number;
     lon: number;
     last_seen: string;
-    latest_data?: Record<string, any>;
+    latest_data?: Record<string, unknown>;
     updated_at?: string;
     province_id?: number;
     province_name?: string;
     province_code?: string;
+    managers?: {
+        id: number;
+        username: string;
+        avatar?: string | null;
+    }[];
 }

@@ -49,7 +49,7 @@ export function PageBreadcrumb() {
     }
 
     return (
-        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between z-1000">
+        <div className="mb-4 flex flex-col gap-2 md:flex-col md:justify-between">
             <Breadcrumb>
                 <BreadcrumbList>
                     <BreadcrumbItem>

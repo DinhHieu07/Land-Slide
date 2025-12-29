@@ -21,6 +21,21 @@ import {
 import { List, MapPin } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Province } from '@/types/province';
 
 type FocusDevice = {
     device_id: string;
@@ -67,6 +82,8 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
     const [zoom, setZoom] = useState(8);
     const [devices, setDevices] = useState<DeviceMarker[]>([]);
     const [sheetOpen, setSheetOpen] = useState(false);
+    const [selectedProvince, setSelectedProvince] = useState<string>("all");
+    const [provinces, setProvinces] = useState<Province[]>([]);
     const focusMarkerRef = useRef<any>(null);
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -97,10 +114,37 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
         fetchDevices();
     }, []);
 
-    // Nhóm thiết bị theo tỉnh
+    useEffect(() => {
+        const fetchProvinces = async () => {
+            try {
+                const res = await fetch(`${API_URL}/api/provinces/list-provinces`);
+                const data = await res.json();
+                if (res.ok && data?.success) {
+                    setProvinces(data.data || []);
+                } else {
+                    console.error("Lỗi khi lấy danh sách tỉnh/thành", data);
+                    setProvinces([]);
+                }
+            } catch (error) {
+                console.error("Lỗi khi lấy danh sách tỉnh/thành", error);
+                setProvinces([]);
+            }
+        };
+        fetchProvinces();
+    }, []);
+
+    // Filter devices theo tỉnh được chọn
+    const filteredDevices = useMemo(() => {
+        if (selectedProvince === "all") {
+            return devices;
+        }
+        return devices.filter(device => device.province_name === selectedProvince);
+    }, [devices, selectedProvince]);
+
+    // Nhóm thiết bị theo tỉnh (sau khi filter)
     const devicesByProvince = useMemo(() => {
         const grouped: Record<string, DeviceMarker[]> = {};
-        devices.forEach(device => {
+        filteredDevices.forEach(device => {
             const provinceKey = device.province_name || 'Chưa xác định';
             if (!grouped[provinceKey]) {
                 grouped[provinceKey] = [];
@@ -108,7 +152,7 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
             grouped[provinceKey].push(device);
         });
         return grouped;
-    }, [devices]);
+    }, [filteredDevices]);
 
     const handleDeviceClick = (device: DeviceMarker) => {
         const focusDeviceData: FocusDevice = {
@@ -150,8 +194,8 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
     };
 
     const statusLabels: Record<string, string> = {
-        online: 'Online',
-        offline: 'Offline',
+        online: 'Hoạt động',
+        offline: 'Không hoạt động',
         disconnected: 'Mất kết nối',
         maintenance: 'Bảo trì',
     };
@@ -231,71 +275,96 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
                             </SheetDescription>
                         </SheetHeader>
 
-                        <div className="mt-6 space-y-6">
+                        <div className="ml-1 mr-1 space-y-4">
+                            <div className="space-y-1.5">
+                                <Label>Tỉnh / Thành</Label>
+                                <Select value={selectedProvince} onValueChange={setSelectedProvince}>
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Tất cả" />
+                                    </SelectTrigger>
+                                    <SelectContent className="max-h-[400px] z-[1001] left-1">
+                                        <SelectItem value="all">Tất cả</SelectItem>
+                                        {provinces.map((p) => (
+                                            <SelectItem key={p.id} value={p.name}>
+                                                {p.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        <div className="mt-4">
                             {Object.keys(devicesByProvince).length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">
                                     Không có thiết bị nào
                                 </p>
                             ) : (
-                                Object.entries(devicesByProvince).map(([province, provinceDevices]) => (
-                                    <div key={province} className="space-y-2">
-                                        <h3 className="ml-2 text-sm font-semibold text-foreground flex items-center gap-2 pb-2 border-b">
-                                            <MapPin className="h-4 w-4" />
-                                            {province}
-                                            <Badge variant="secondary" className="ml-auto">
-                                                {provinceDevices.length}
-                                            </Badge>
-                                        </h3>
-                                        <div className="space-y-1 pl-2">
-                                            {provinceDevices.map((device) => (
-                                                <div
-                                                    key={device.device_id}
-                                                    onClick={() => handleDeviceClick(device)}
-                                                    className="p-3 rounded-lg border cursor-pointer hover:bg-accent transition-colors"
-                                                >
-                                                    <div className="flex items-start justify-between">
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-sm font-medium text-foreground truncate">
-                                                                {device.name}
-                                                            </p>
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                ID: {device.device_id}
-                                                            </p>
-                                                        </div>
-                                                        <Badge
-                                                            variant="outline"
-                                                            className="ml-2 shrink-0"
-                                                            style={{
-                                                                backgroundColor: device.status
-                                                                    ? `${statusColors[device.status]}20`
-                                                                    : undefined,
-                                                                borderColor: device.status
-                                                                    ? statusColors[device.status]
-                                                                    : undefined,
-                                                                color: device.status
-                                                                    ? statusColors[device.status]
-                                                                    : undefined,
-                                                            }}
-                                                        >
-                                                            {device.status ? statusLabels[device.status] : 'N/A'}
-                                                        </Badge>
-                                                    </div>
-                                                    {device.updated_at && (
-                                                        <p className="text-xs text-muted-foreground mt-2">
-                                                            Cập nhật: {new Date(device.updated_at).toLocaleString('vi-VN', {
-                                                                day: '2-digit',
-                                                                month: '2-digit',
-                                                                year: 'numeric',
-                                                                hour: '2-digit',
-                                                                minute: '2-digit'
-                                                            })}
-                                                        </p>
-                                                    )}
+                                <Accordion type="single" collapsible className="w-full">
+                                    {Object.entries(devicesByProvince).map(([province, provinceDevices]) => (
+                                        <AccordionItem key={province} value={province}>
+                                            <AccordionTrigger className="hover:no-underline">
+                                                <div className="flex items-center gap-2 flex-1">
+                                                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                                                    <span className="font-semibold">{province}</span>
+                                                    <Badge variant="secondary" className="ml-auto">
+                                                        {provinceDevices.length}
+                                                    </Badge>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))
+                                            </AccordionTrigger>
+                                            <AccordionContent>
+                                                <div className="space-y-2 pt-2">
+                                                    {provinceDevices.map((device) => (
+                                                        <div
+                                                            key={device.device_id}
+                                                            onClick={() => handleDeviceClick(device)}
+                                                            className="p-3 rounded-lg border cursor-pointer hover:bg-accent transition-colors"
+                                                        >
+                                                            <div className="flex items-start justify-between">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-sm font-medium text-foreground truncate">
+                                                                        {device.name}
+                                                                    </p>
+                                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                                        ID: {device.device_id}
+                                                                    </p>
+                                                                </div>
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className="ml-2 shrink-0"
+                                                                    style={{
+                                                                        backgroundColor: device.status
+                                                                            ? `${statusColors[device.status]}20`
+                                                                            : undefined,
+                                                                        borderColor: device.status
+                                                                            ? statusColors[device.status]
+                                                                            : undefined,
+                                                                        color: device.status
+                                                                            ? statusColors[device.status]
+                                                                            : undefined,
+                                                                    }}
+                                                                >
+                                                                    {device.status ? statusLabels[device.status] : 'N/A'}
+                                                                </Badge>
+                                                            </div>
+                                                            {device.updated_at && (
+                                                                <p className="text-xs text-muted-foreground mt-2">
+                                                                    Cập nhật: {new Date(device.updated_at).toLocaleString('vi-VN', {
+                                                                        day: '2-digit',
+                                                                        month: '2-digit',
+                                                                        year: 'numeric',
+                                                                        hour: '2-digit',
+                                                                        minute: '2-digit'
+                                                                    })}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    ))}
+                                </Accordion>
                             )}
                         </div>
                     </SheetContent>
@@ -319,11 +388,10 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
                         // @ts-expect-error
                         attribution='&copy; OpenStreetMap contributors' // Attribution để tuân thủ quyền sở hữu
                     />
-                    {devices.map((d) => {
-                        // Kiểm tra xem thiết bị này có phải là focusDevice không
+                    {filteredDevices.map((d) => {
                         const isFocused = currentFocusDevice?.device_id === d.device_id;
                         
-                        // Nếu là focusDevice thì không render ở đây (sẽ render riêng với active=true)
+                        // Nếu là focusDevice thì không render ở đây
                         if (isFocused) return null;
 
                         return (
@@ -341,7 +409,7 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
                                         <p className="text-xs text-gray-600">Kinh độ: {d.lon}</p>
                                         {d.status && (
                                             <p className="text-xs text-gray-600">
-                                                Trạng thái kết nối: {d.status === "disconnected" ? "Mất kết nối" : d.status === "maintenance" ? "Bảo trì" : d.status === "offline" ? "Offline" : d.status === "online" ? "Online" : d.status}
+                                                Trạng thái kết nối: {d.status === "disconnected" ? "Mất kết nối" : d.status === "maintenance" ? "Bảo trì" : d.status === "online" ? "Hoạt động" : d.status}
                                             </p>
                                         )}
                                         <p className="text-xs text-gray-600">Lần cập nhật gần nhất:
@@ -374,7 +442,7 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
                                     <p className="text-xs text-gray-600">Kinh độ: {currentFocusDevice.lon}</p>
                                     {currentFocusDevice.status && (
                                         <p className="text-xs text-gray-600">
-                                            Trạng thái kết nối: {currentFocusDevice.status === "disconnected" ? "Mất kết nối" : currentFocusDevice.status === "maintenance" ? "Bảo trì" : currentFocusDevice.status === "offline" ? "Offline" : currentFocusDevice.status === "online" ? "Online" : currentFocusDevice.status}
+                                            Trạng thái kết nối: {currentFocusDevice.status === "disconnected" ? "Mất kết nối" : currentFocusDevice.status === "maintenance" ? "Bảo trì" : currentFocusDevice.status === "online" ? "Hoạt động" : currentFocusDevice.status}
                                         </p>
                                     )}
                                     {currentFocusDevice.updated_at && (
@@ -394,6 +462,24 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
                         </Marker>
                     )}
                 </MapContainer>
+
+                {/* Chú thích trạng thái thiết bị */}
+                <div className="pointer-events-none absolute bottom-4 right-4 z-[900]">
+                    <div className="pointer-events-auto rounded-md bg-white/95 shadow-md border px-3 py-2 text-xs text-gray-700 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: statusColors.online }} />
+                            <span>Thiết bị hoạt động</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: statusColors.disconnected }} />
+                            <span>Mất kết nối</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: statusColors.maintenance }} />
+                            <span>Đang bảo trì</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     );

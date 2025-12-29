@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useContext, createContext } from "react";
 import { logout as logoutUtil } from "@/lib/auth";
 
-interface User {
+export interface User {
     id: number;
     username: string;
     role: string;

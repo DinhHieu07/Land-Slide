@@ -114,31 +114,31 @@ const getSensorDataHistory = async (req, res) => {
         if (device_id) {
             paramCount++;
             values.push(device_id);
-            conditions.push(`s.device_id = $${paramCount}`);
+            conditions.push(`d.device_id = $${paramCount}`);
         }
 
         if (sensor_type) {
             paramCount++;
             values.push(sensor_type);
-            conditions.push(`s.sensor_type = $${paramCount}`);
+            conditions.push(`s.type = $${paramCount}`);
         }
 
         if (start_date) {
             paramCount++;
             values.push(start_date);
-            conditions.push(`s.recorded_at >= $${paramCount}`);
+            conditions.push(`h.recorded_at >= $${paramCount}`);
         }
 
         if (end_date) {
             paramCount++;
             values.push(end_date);
-            conditions.push(`s.recorded_at <= $${paramCount}`);
+            conditions.push(`h.recorded_at <= $${paramCount}`);
         }
 
         if (q) {
             paramCount++;
             values.push(`%${q}%`);
-            conditions.push(`(s.device_id ILIKE $${paramCount} OR d.name ILIKE $${paramCount})`);
+            conditions.push(`(d.device_id ILIKE $${paramCount} OR d.name ILIKE $${paramCount})`);
         }
 
         const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -149,24 +149,33 @@ const getSensorDataHistory = async (req, res) => {
         values.push(parseInt(offset) || 0);
 
         // Lấy tổng số
-        const countQuery = `SELECT COUNT(*) as total FROM sensor_data_history s LEFT JOIN devices d ON s.device_id = d.device_id ${whereClause}`;
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM sensor_data_history h
+            JOIN sensors s ON s.id = h.sensor_id
+            JOIN devices d ON d.id = s.device_id
+            ${whereClause}
+        `;
         const countResult = await pool.query(countQuery, values.slice(0, -2));
         const total = parseInt(countResult.rows[0].total);
 
-        // Lấy dữ liệu với thông tin thiết bị
+        // Lấy dữ liệu với thông tin thiết bị và cảm biến
         const query = `
             SELECT 
-                s.id,
-                s.device_id,
+                h.id,
+                d.device_id,
                 d.name as device_name,
-                s.sensor_type,
-                s.data,
-                s.recorded_at,
-                s.created_at
-            FROM sensor_data_history s
-            LEFT JOIN devices d ON s.device_id = d.device_id
+                s.type as sensor_type,
+                s.code,
+                s.name as sensor_name,
+                h.value,
+                h.recorded_at,
+                h.created_at
+            FROM sensor_data_history h
+            JOIN sensors s ON s.id = h.sensor_id
+            JOIN devices d ON d.id = s.device_id
             ${whereClause}
-            ORDER BY s.recorded_at DESC
+            ORDER BY h.recorded_at DESC
             LIMIT $${paramCount - 1} OFFSET $${paramCount}
         `;
 
@@ -191,33 +200,42 @@ const getSensorDataHistory = async (req, res) => {
 // Lưu dữ liệu cảm biến mới (cho IoT devices gửi dữ liệu)
 const saveSensorData = async (req, res) => {
     try {
-        const { device_id, sensor_type, data } = req.body;
+        const { code, value } = req.body;
 
-        // Kiểm tra thiết bị tồn tại
-        const deviceCheck = await pool.query(
-            'SELECT id FROM devices WHERE device_id = $1',
-            [device_id]
+        // Kiểm tra sensor tồn tại và lấy device
+        const sensorCheck = await pool.query(
+            'SELECT id, device_id, type FROM sensors WHERE code = $1 LIMIT 1',
+            [code]
         );
 
-        if (deviceCheck.rows.length === 0) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị' });
+        if (sensorCheck.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy cảm biến' });
         }
+
+        const sensorRow = sensorCheck.rows[0];
 
         // Lưu lịch sử
         const insertQuery = `
-            INSERT INTO sensor_data_history (device_id, sensor_type, data, recorded_at)
-            VALUES ($1, $2, $3, NOW())
+            INSERT INTO sensor_data_history (sensor_id, value, recorded_at)
+            VALUES ($1, $2, NOW())
             RETURNING id
         `;
-        const insertResult = await pool.query(insertQuery, [device_id, sensor_type, JSON.stringify(data)]);
+        const insertResult = await pool.query(insertQuery, [sensorRow.id, value]);
 
-        // Cập nhật latest_data và last_seen của thiết bị
+        // Cập nhật latest_data và last_seen của thiết bị (lưu key theo loại cảm biến)
         const updateQuery = `
             UPDATE devices 
-            SET latest_data = $1, last_seen = NOW(), updated_at = NOW()
-            WHERE device_id = $2
+            SET latest_data = jsonb_set(
+                    COALESCE(latest_data, '{}'::jsonb),
+                    ARRAY[$1],
+                    to_jsonb($2::numeric),
+                    true
+                ),
+                last_seen = NOW(),
+                updated_at = NOW()
+            WHERE id = $3
         `;
-        await pool.query(updateQuery, [JSON.stringify(data), device_id]);
+        await pool.query(updateQuery, [sensorRow.type, value, sensorRow.device_id]);
 
         return res.json({
             success: true,
@@ -241,30 +259,30 @@ const getSensorDataStats = async (req, res) => {
         if (device_id) {
             paramCount++;
             values.push(device_id);
-            conditions.push(`device_id = $${paramCount}`);
+            conditions.push(`d.device_id = $${paramCount}`);
         }
 
         if (sensor_type) {
             paramCount++;
             values.push(sensor_type);
-            conditions.push(`sensor_type = $${paramCount}`);
+            conditions.push(`s.type = $${paramCount}`);
         }
 
         if (start_date) {
             paramCount++;
             values.push(start_date);
-            conditions.push(`recorded_at >= $${paramCount}`);
+            conditions.push(`h.recorded_at >= $${paramCount}`);
         } else {
             // Mặc định 7 ngày gần nhất
             paramCount++;
             values.push(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
-            conditions.push(`recorded_at >= $${paramCount}`);
+            conditions.push(`h.recorded_at >= $${paramCount}`);
         }
 
         if (end_date) {
             paramCount++;
             values.push(end_date);
-            conditions.push(`recorded_at <= $${paramCount}`);
+            conditions.push(`h.recorded_at <= $${paramCount}`);
         }
 
         const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -287,13 +305,16 @@ const getSensorDataStats = async (req, res) => {
         const query = `
             SELECT 
                 ${dateTrunc} as time_bucket,
+                s.type as sensor_type,
                 COUNT(*) as count,
-                AVG((data->>'value')::numeric) as avg_value,
-                MIN((data->>'value')::numeric) as min_value,
-                MAX((data->>'value')::numeric) as max_value
-            FROM sensor_data_history
+                AVG(value) as avg_value,
+                MIN(value) as min_value,
+                MAX(value) as max_value
+            FROM sensor_data_history h
+            JOIN sensors s ON s.id = h.sensor_id
+            JOIN devices d ON d.id = s.device_id
             ${whereClause}
-            GROUP BY time_bucket
+            GROUP BY time_bucket, s.type
             ORDER BY time_bucket ASC
         `;
 

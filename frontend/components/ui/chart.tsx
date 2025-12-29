@@ -74,8 +74,8 @@ type CustomTooltipProps = React.HTMLAttributes<HTMLDivElement> & {
     payload?: TooltipPayload[];
     label?: React.ReactNode;
     formatter?: (
-        value: any,
-        name: any,
+        value: string | number,
+        name: string | number,
         item: TooltipPayload,
         index: number,
         payload: TooltipPayload[]

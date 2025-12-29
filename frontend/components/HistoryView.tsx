@@ -15,24 +15,36 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Download, Filter } from "lucide-react";
+import { Download, Filter, Info, AlertTriangle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dayjs from "dayjs";
 import { ChevronDownIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import Header from "./Header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/types/alert";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-type AlertHistory = {
-    id: number;
-    event_id: number | null;
-    alert_level: string;
-    message: string;
-    created_at: string;
-    event_name: string | null;
-    event_severity: number | null;
+const severityColors: Record<Alert["severity"], string> = {
+    info: "bg-blue-100 text-blue-800 border-blue-200",
+    warning: "bg-amber-100 text-amber-800 border-amber-200",
+    critical: "bg-red-100 text-red-800 border-red-200",
+};
+
+const statusColors: Record<Alert["status"], string> = {
+    active: "bg-red-100 text-red-800",
+    acknowledged: "bg-yellow-100 text-yellow-800",
+    resolved: "bg-green-100 text-green-800",
+};
+
+const categoryLabels: Record<Alert["category"], string> = {
+    threshold: "Vượt ngưỡng",
+    hardware: "Phần cứng",
+    prediction: "Dự đoán",
+    system: "Hệ thống",
 };
 
 type SensorDataHistory = {
@@ -40,17 +52,19 @@ type SensorDataHistory = {
     device_id: string;
     device_name: string;
     sensor_type: string;
-    data: Record<string, any>;
+    code: string;
+    sensor_name: string | null;
+    value: number;
     recorded_at: string;
     created_at: string;
 };
 
-const dataLabels: Record<string, string> = {
-    slope_deg: "Độ dốc (°)",
-    vibration_g: "Rung (g)",
-    rainfall_24h: "Lượng mưa (mm)",
-    soil_moisture: "Độ ẩm (%)",
-    displacement_mm: "Vị trí (mm)",
+const dataLabels: Record<string, { label: string; unit: string }> = {
+    slope_deg: { label: "Độ dốc", unit: "°" },
+    vibration_g: { label: "Cảm biến rung", unit: "g" },
+    rainfall_24h: { label: "Lượng mưa 24h", unit: "mm" },
+    soil_moisture: { label: "Độ ẩm đất", unit: "%" },
+    tilt_deg: { label: "Độ nghiêng", unit: "°" },
 };
 
 export default function HistoryView() {
@@ -60,10 +74,12 @@ export default function HistoryView() {
     // Alert filters
     const [alertStartDate, setAlertStartDate] = useState("");
     const [alertEndDate, setAlertEndDate] = useState("");
-    const [alertLevel, setAlertLevel] = useState("all");
+    const [alertSeverity, setAlertSeverity] = useState("all");
+    const [alertStatus, setAlertStatus] = useState("all");
+    const [alertCategory, setAlertCategory] = useState("all");
     const [alertQuery, setAlertQuery] = useState("");
     const [debouncedAlertQuery, setDebouncedAlertQuery] = useState("");
-    const [alerts, setAlerts] = useState<AlertHistory[]>([]);
+    const [alerts, setAlerts] = useState<Alert[]>([]);
     const [alertPage, setAlertPage] = useState(1);
     const [alertTotalPages, setAlertTotalPages] = useState(1);
     const [alertTotal, setAlertTotal] = useState(0);
@@ -101,7 +117,7 @@ export default function HistoryView() {
 
     const applyQuickRange = (
         range: "24h" | "7d" | "30d",
-        setRangeState: (v: any) => void,
+        setRangeState: (v: "24h" | "7d" | "30d") => void,
         setStart: (v: string) => void,
         setEnd: (v: string) => void
     ) => {
@@ -165,7 +181,9 @@ export default function HistoryView() {
         sensorPage,
         alertStartDate,
         alertEndDate,
-        alertLevel,
+        alertSeverity,
+        alertStatus,
+        alertCategory,
         debouncedAlertQuery,
         alertQuickRange,
         sensorStartDate,
@@ -178,7 +196,7 @@ export default function HistoryView() {
     // Reset về trang 1 khi đổi filter
     useEffect(() => {
         setAlertPage(1);
-    }, [alertStartDate, alertEndDate, alertLevel, debouncedAlertQuery, alertQuickRange]);
+    }, [alertStartDate, alertEndDate, alertSeverity, alertStatus, alertCategory, debouncedAlertQuery, alertQuickRange]);
 
     useEffect(() => {
         setSensorPage(1);
@@ -189,7 +207,7 @@ export default function HistoryView() {
             const res = await authenticatedFetch(`${API_URL}/api/devices`, { method: "GET" });
             const data = await res.json();
             if (data?.success) {
-                setDevices(data.data.map((d: any) => ({ device_id: d.device_id, name: d.name })));
+                setDevices(data.data.map((d: { device_id: string; name: string }) => ({ device_id: d.device_id, name: d.name })));
             }
         } catch (error) {
             console.error("Lỗi khi lấy danh sách thiết bị:", error);
@@ -201,21 +219,37 @@ export default function HistoryView() {
             setLoadingAlerts(true);
             setAlertError(null);
             const params = new URLSearchParams();
-            if (alertStartDate) params.append("start_date", alertStartDate);
-            if (alertEndDate) params.append("end_date", alertEndDate);
-            if (alertLevel !== "all") params.append("alert_level", alertLevel);
-            if (debouncedAlertQuery) params.append("q", debouncedAlertQuery);
+            if (debouncedAlertQuery) params.append("search", debouncedAlertQuery);
+            if (alertSeverity !== "all") params.append("severity", alertSeverity);
+            if (alertStatus !== "all") params.append("status", alertStatus);
+            if (alertCategory !== "all") params.append("category", alertCategory);
             params.append("limit", pageSize.toString());
             params.append("offset", ((alertPage - 1) * pageSize).toString());
 
-            const res = await authenticatedFetch(`${API_URL}/api/history/alerts?${params.toString()}`, {
+            const res = await authenticatedFetch(`${API_URL}/api/alerts?${params.toString()}`, {
                 method: "GET",
             });
             const data = await res.json();
             if (res.ok && data.success) {
-                setAlerts(data.data || []);
+                let filteredData = data.data || [];
+                if (alertStartDate || alertEndDate) {
+                    filteredData = filteredData.filter((alert: Alert) => {
+                        const alertDate = new Date(alert.created_at);
+                        if (alertStartDate) {
+                            const startDate = new Date(alertStartDate);
+                            if (alertDate < startDate) return false;
+                        }
+                        if (alertEndDate) {
+                            const endDate = new Date(alertEndDate);
+                            endDate.setHours(23, 59, 59, 999);
+                            if (alertDate > endDate) return false;
+                        }
+                        return true;
+                    });
+                }
+                setAlerts(filteredData);
                 setAlertTotalPages(data.pagination?.totalPages || 1);
-                setAlertTotal(data.pagination?.total || data.data?.length || 0);
+                setAlertTotal(filteredData.length || data.pagination?.total || 0);
             } else {
                 setAlerts([]);
                 setAlertTotal(0);
@@ -249,7 +283,6 @@ export default function HistoryView() {
                 method: "GET",
             });
             const data = await res.json();
-            console.log(data);
             if (res.ok && data.success) {
                 setSensorData(data.data || []);
                 setSensorTotalPages(data.pagination?.totalPages || 1);
@@ -297,6 +330,50 @@ export default function HistoryView() {
     //     link.click();
     // };
 
+    if (loading) {
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                    <div className="space-y-2">
+                        <Skeleton className="h-9 w-64" />
+                        <Skeleton className="h-4 w-96" />
+                    </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                    {[1, 2, 3].map((i) => (
+                        <Card key={i}>
+                            <CardHeader className="pb-2">
+                                <Skeleton className="h-4 w-32 mb-2" />
+                                <Skeleton className="h-8 w-16" />
+                            </CardHeader>
+                            <CardContent>
+                                <Skeleton className="h-3 w-48" />
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+
+                <div className="space-y-4">
+                    <Skeleton className="h-10 w-full" />
+                    <Card>
+                        <CardHeader>
+                            <Skeleton className="h-6 w-32 mb-2" />
+                            <Skeleton className="h-4 w-64" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-3">
+                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
+        );
+    }
+
     if (!isAuthenticated || !isAdmin) {
         return (
             <div className="p-6">
@@ -310,23 +387,16 @@ export default function HistoryView() {
     }
 
     // Loading giống Dashboard: spinner toàn màn hình
-    if (loading || loadingAlerts || loadingSensorData) {
-        return (
-            <div className="p-6 flex items-center justify-center min-h-screen">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Đang tải dữ liệu...</p>
-                </div>
-            </div>
-        );
-    }
-
-    const alertLevelColors: Record<string, string> = {
-        low: "bg-blue-100 text-blue-800",
-        medium: "bg-yellow-100 text-yellow-800",
-        high: "bg-orange-100 text-orange-800",
-        critical: "bg-red-100 text-red-800",
-    };
+    // if (loading || loadingAlerts || loadingSensorData) {
+    //     return (
+    //         <div className="p-6 flex items-center justify-center min-h-screen">
+    //             <div className="text-center">
+    //                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+    //                 <p className="text-gray-600">Đang tải dữ liệu...</p>
+    //             </div>
+    //         </div>
+    //     );
+    // }
 
     const typeLabels: Record<string, string> = {
         vibration: "Cảm biến rung",
@@ -361,7 +431,7 @@ export default function HistoryView() {
     }
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold">Lịch sử hệ thống</h1>
@@ -369,7 +439,6 @@ export default function HistoryView() {
                         Quản lý lịch sử cảnh báo và dữ liệu cảm biến
                     </p>
                 </div>
-                <Header />
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -395,7 +464,7 @@ export default function HistoryView() {
                     <CardHeader className="pb-2">
                         <CardDescription>Phạm vi thời gian</CardDescription>
                         <CardTitle className="text-lg">
-                            Alert: {alertQuickRange.toUpperCase()} · Sensor: {sensorQuickRange.toUpperCase()}
+                            Cảnh báo: {alertQuickRange.toUpperCase()} · Dữ liệu cảm biến: {sensorQuickRange.toUpperCase()}
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground">
@@ -418,117 +487,145 @@ export default function HistoryView() {
                             <CardDescription>Lọc lịch sử cảnh báo theo tiêu chí</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="grid gap-4 md:grid-cols-5">
-                                <div className="md:col-span-2">
-                                    <Label>Từ khóa (thông điệp / sự kiện)</Label>
-                                    <Input
-                                        value={alertQuery}
-                                        onChange={(e) => setAlertQuery(e.target.value)}
-                                        placeholder="Nhập từ khóa"
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor="dateFrom1">Từ ngày</Label>
-                                    <Popover open={alertStartOpen} onOpenChange={setAlertStartOpen}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                id="dateFrom1"
-                                                className="w-full justify-between font-normal"
-                                            >
-                                                {alertStartPicker
-                                                    ? dayjs(alertStartPicker).format("DD/MM/YYYY")
-                                                    : "Chọn ngày"}
-                                                <ChevronDownIcon className="h-4 w-4" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto overflow-hidden p-0" align="start">
-                                            <Calendar
-                                                mode="single"
-                                                selected={alertStartPicker}
-                                                captionLayout="dropdown"
-                                                onSelect={(date: Date | undefined) => {
-                                                    setAlertStartPicker(date || undefined);
-                                                    if (date) {
-                                                        setAlertStartDate(formatDateInput(dayjs(date)));
-                                                    } else {
-                                                        setAlertStartDate("");
-                                                    }
-                                                    setAlertStartOpen(false);
-                                                }}
-                                            />
-                                        </PopoverContent>
-                                    </Popover>
-                                </div>
-                                <div>
-                                    <Label htmlFor="dateTo1">Đến ngày</Label>
-                                    <Popover open={alertEndOpen} onOpenChange={setAlertEndOpen}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                id="dateTo1"
-                                                className="w-full justify-between font-normal"
-                                            >
-                                                {alertEndPicker
-                                                    ? dayjs(alertEndPicker).format("DD/MM/YYYY")
-                                                    : "Chọn ngày"}
-                                                <ChevronDownIcon className="h-4 w-4" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto overflow-hidden p-0" align="start">
-                                            <Calendar
-                                                mode="single"
-                                                selected={alertEndPicker}
-                                                captionLayout="dropdown"
-                                                onSelect={(date: Date | undefined) => {
-                                                    setAlertEndPicker(date || undefined);
-                                                    if (date) {
-                                                        setAlertEndDate(formatDateInput(dayjs(date)));
-                                                    } else {
-                                                        setAlertEndDate("");
-                                                    }
-                                                    setAlertEndOpen(false);
-                                                }}
-                                            />
-                                        </PopoverContent>
-                                    </Popover>
-                                </div>
-                                <div>
-                                    <Label>Mức độ</Label>
-                                    <Select value={alertLevel} onValueChange={setAlertLevel}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Tất cả" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">Tất cả</SelectItem>
-                                            <SelectItem value="low">Thấp</SelectItem>
-                                            <SelectItem value="medium">Trung bình</SelectItem>
-                                            <SelectItem value="high">Cao</SelectItem>
-                                            <SelectItem value="critical">Nghiêm trọng</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="flex items-end gap-2">
-                                    <div className="flex gap-2 w-full">
-                                        {(["24h", "7d", "30d"] as const).map((preset) => (
-                                            <Button
-                                                key={preset}
-                                                variant={alertQuickRange === preset ? "default" : "outline"}
-                                                size="sm"
-                                                className="flex-1"
-                                                onClick={() =>
-                                                    applyQuickRange(
-                                                        preset,
-                                                        setAlertQuickRange,
-                                                        setAlertStartDate,
-                                                        setAlertEndDate
-                                                    )
-                                                }
-                                            >
-                                                {preset}
-                                            </Button>
-                                        ))}
+                            <div className="space-y-4">
+                                <div className="grid gap-4 md:grid-cols-7">
+                                    <div className="md:col-span-2">
+                                        <Label>Từ khóa tìm kiếm</Label>
+                                        <Input
+                                            value={alertQuery}
+                                            onChange={(e) => setAlertQuery(e.target.value)}
+                                            placeholder="Nhập từ khóa tìm kiếm..."
+                                        />
                                     </div>
+                                    <div>
+                                        <Label htmlFor="dateFrom1">Từ ngày</Label>
+                                        <Popover open={alertStartOpen} onOpenChange={setAlertStartOpen}>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant="outline"
+                                                    id="dateFrom1"
+                                                    className="w-full justify-between font-normal"
+                                                >
+                                                    {alertStartPicker
+                                                        ? dayjs(alertStartPicker).format("DD/MM/YYYY")
+                                                        : "Chọn ngày"}
+                                                    <ChevronDownIcon className="h-4 w-4" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                                                <Calendar
+                                                    mode="single"
+                                                    selected={alertStartPicker}
+                                                    captionLayout="dropdown"
+                                                    onSelect={(date: Date | undefined) => {
+                                                        setAlertStartPicker(date || undefined);
+                                                        if (date) {
+                                                            setAlertStartDate(formatDateInput(dayjs(date)));
+                                                        } else {
+                                                            setAlertStartDate("");
+                                                        }
+                                                        setAlertStartOpen(false);
+                                                    }}
+                                                />
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="dateTo1">Đến ngày</Label>
+                                        <Popover open={alertEndOpen} onOpenChange={setAlertEndOpen}>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant="outline"
+                                                    id="dateTo1"
+                                                    className="w-full justify-between font-normal"
+                                                >
+                                                    {alertEndPicker
+                                                        ? dayjs(alertEndPicker).format("DD/MM/YYYY")
+                                                        : "Chọn ngày"}
+                                                    <ChevronDownIcon className="h-4 w-4" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+                                                <Calendar
+                                                    mode="single"
+                                                    selected={alertEndPicker}
+                                                    captionLayout="dropdown"
+                                                    onSelect={(date: Date | undefined) => {
+                                                        setAlertEndPicker(date || undefined);
+                                                        if (date) {
+                                                            setAlertEndDate(formatDateInput(dayjs(date)));
+                                                        } else {
+                                                            setAlertEndDate("");
+                                                        }
+                                                        setAlertEndOpen(false);
+                                                    }}
+                                                />
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
+                                    <div>
+                                        <Label>Mức độ</Label>
+                                        <Select value={alertSeverity} onValueChange={setAlertSeverity}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Tất cả" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Tất cả</SelectItem>
+                                                <SelectItem value="info">Thông tin</SelectItem>
+                                                <SelectItem value="warning">Cảnh báo</SelectItem>
+                                                <SelectItem value="critical">Nghiêm trọng</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label>Trạng thái</Label>
+                                        <Select value={alertStatus} onValueChange={setAlertStatus}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Tất cả" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Tất cả</SelectItem>
+                                                <SelectItem value="active">Chưa xử lý</SelectItem>
+                                                <SelectItem value="acknowledged">Đã xác nhận</SelectItem>
+                                                <SelectItem value="resolved">Đã xử lý</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label>Loại</Label>
+                                        <Select value={alertCategory} onValueChange={setAlertCategory}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Tất cả" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Tất cả</SelectItem>
+                                                <SelectItem value="threshold">Vượt ngưỡng</SelectItem>
+                                                <SelectItem value="hardware">Phần cứng</SelectItem>
+                                                <SelectItem value="prediction">Dự đoán</SelectItem>
+                                                <SelectItem value="system">Hệ thống</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Label className="text-sm text-muted-foreground">Phạm vi nhanh:</Label>
+                                    {(["24h", "7d", "30d"] as const).map((preset) => (
+                                        <Button
+                                            key={preset}
+                                            variant={alertQuickRange === preset ? "default" : "outline"}
+                                            size="sm"
+                                            onClick={() =>
+                                                applyQuickRange(
+                                                    preset,
+                                                    setAlertQuickRange,
+                                                    setAlertStartDate,
+                                                    setAlertEndDate
+                                                )
+                                            }
+                                        >
+                                            {preset}
+                                        </Button>
+                                    ))}
                                 </div>
                             </div>
                             <div className="flex items-center justify-between gap-3 mt-4 flex-wrap">
@@ -566,49 +663,85 @@ export default function HistoryView() {
                                     <thead className="bg-gray-50">
                                         <tr>
                                             <th className="px-4 py-3 text-left font-semibold">ID</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Tiêu đề</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Thiết bị</th>
                                             <th className="px-4 py-3 text-left font-semibold">Mức độ</th>
-                                            <th className="px-4 py-3 text-left font-semibold">Thông điệp</th>
-                                            <th className="px-4 py-3 text-left font-semibold">Sự kiện</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Trạng thái</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Loại</th>
                                             <th className="px-4 py-3 text-left font-semibold">Thời gian</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {alerts.length === 0 ? (
+                                        {loadingAlerts ? (
                                             <tr>
-                                                <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
-                                                    Không lấy được dữ liệu
+                                                <td colSpan={7} className="px-4 py-12">
+                                                    <div className="flex flex-col items-center justify-center">
+                                                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                                                        <p className="text-gray-600">Đang tải danh sách cảnh báo...</p>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : alerts.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={7} className="px-4 py-12 text-center">
+                                                    <p className="text-gray-600">Không có cảnh báo nào</p>
                                                 </td>
                                             </tr>
                                         ) : (
                                             alerts.map((alert) => (
-                                                <tr key={alert.id} className="border-t">
-                                                    <td className="px-4 py-3">#{alert.id}</td>
+                                                <tr key={alert.id} className="border-t hover:bg-gray-50">
+                                                    <td className="px-4 py-3 font-medium text-gray-900">#{alert.id}</td>
                                                     <td className="px-4 py-3">
-                                                        <span
-                                                            className={cn(
-                                                                "inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold",
-                                                                alertLevelColors[alert.alert_level] || "bg-gray-100 text-gray-800"
-                                                            )}
-                                                        >
-                                                            {alert.alert_level}
-                                                        </span>
+                                                        <div className="font-medium text-gray-900">{alert.title}</div>
+                                                        <div className="text-xs text-gray-500 line-clamp-1">{alert.message}</div>
                                                     </td>
-                                                    <td className="px-4 py-3">{alert.message}</td>
-                                                    <td className="px-4 py-3">
-                                                        {alert.event_name ? (
-                                                            <span>
-                                                                {alert.event_name}
-                                                                {alert.event_severity && (
-                                                                    <span className="text-xs text-muted-foreground ml-1">
-                                                                        (Mức {alert.event_severity})
-                                                                    </span>
-                                                                )}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-muted-foreground">-</span>
+                                                    <td className="px-4 py-3 text-gray-700">
+                                                        {alert.device_name || alert.device_code || "—"}
+                                                        {alert.sensor_name && (
+                                                            <div className="text-xs text-gray-500">
+                                                                Cảm biến: {alert.sensor_name}
+                                                            </div>
                                                         )}
                                                     </td>
                                                     <td className="px-4 py-3">
+                                                        <span
+                                                            className={cn(
+                                                                "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold cursor-default",
+                                                                severityColors[alert.severity]
+                                                            )}
+                                                        >
+                                                            {alert.severity === "info" ? (
+                                                                <Info className="size-3 mr-1" />
+                                                            ) : alert.severity === "warning" ? (
+                                                                <AlertTriangle className="size-3 mr-1" />
+                                                            ) : (
+                                                                <XCircle className="size-3 mr-1" />
+                                                            )}
+                                                            {alert.severity === "info"
+                                                                ? "Thông tin"
+                                                                : alert.severity === "warning"
+                                                                    ? "Cảnh báo"
+                                                                    : "Nghiêm trọng"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span
+                                                            className={cn(
+                                                                "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold cursor-default",
+                                                                statusColors[alert.status]
+                                                            )}
+                                                        >
+                                                            {alert.status === "active"
+                                                                ? "Chưa xử lý"
+                                                                : alert.status === "acknowledged"
+                                                                    ? "Đã xác nhận"
+                                                                    : "Đã xử lý"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-gray-700">
+                                                        {categoryLabels[alert.category]}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-gray-700">
                                                         {new Date(alert.created_at).toLocaleString("vi-VN")}
                                                     </td>
                                                 </tr>
@@ -673,7 +806,7 @@ export default function HistoryView() {
                             <CardDescription>Lọc dữ liệu cảm biến theo tiêu chí</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="grid gap-4 md:grid-cols-6">
+                            <div className="grid gap-4 md:grid-cols-5">
                                 <div className="md:col-span-2">
                                     <Label>Tìm kiếm (thiết bị / ID)</Label>
                                     <Input
@@ -764,8 +897,9 @@ export default function HistoryView() {
                                         </PopoverContent>
                                     </Popover>
                                 </div>
-                                <div className="flex items-end gap-2">
-                                    <div className="flex gap-2 w-full">
+                                <div className="flex items-center gap-2">
+                                    <div className="flex gap-2 items-center">
+                                        <Label className="text-sm text-muted-foreground">Phạm vi nhanh:</Label>
                                         {(["24h", "7d", "30d"] as const).map((preset) => (
                                             <Button
                                                 key={preset}
@@ -824,46 +958,57 @@ export default function HistoryView() {
                                 <table className="min-w-full text-sm">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="px-4 py-3 text-left font-semibold">ID thiết bị</th>
-                                            <th className="px-4 py-3 text-left font-semibold">Thiết bị</th>
-                                            <th className="px-4 py-3 text-left font-semibold">Dữ liệu</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Cảm biến</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Thiết bị quản lý</th>
+                                            <th className="px-4 py-3 text-left font-semibold">Giá trị đo</th>
                                             <th className="px-4 py-3 text-left font-semibold">Thời gian ghi</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {sensorData.length === 0 ? (
+                                        {loadingSensorData ? (
                                             <tr>
-                                                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
-                                                    Không lấy được dữ liệu
+                                                <td colSpan={6} className="px-4 py-12">
+                                                    <div className="flex flex-col items-center justify-center">
+                                                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                                                        <p className="text-gray-600">Đang tải danh sách dữ liệu cảm biến...</p>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : sensorData.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={6} className="px-4 py-12 text-center">
+                                                    <p className="text-gray-600">Không có dữ liệu cảm biến nào trong khoảng thời gian này</p>
                                                 </td>
                                             </tr>
                                         ) : (
-                                            sensorData.map((data) => (
-                                                <tr key={data.id} className="border-t">
-                                                    <td className="px-4 py-3">{data.device_id}</td>
-                                                    <td className="px-4 py-3">
-                                                        <div>
-                                                            <div className="font-medium">{data.device_name}</div>
-                                                            <div className="text-xs text-muted-foreground">{data.device_id}</div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <div className="space-y-1">
-                                                            {Object.entries(data.data).map(([key, value]) => (
-                                                                <div key={key} className="text-xs">
-                                                                    <span className="font-medium">{dataLabels[key] || key}:</span>{" "}
-                                                                    <span className="text-muted-foreground">
-                                                                        {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                                                                    </span>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        {new Date(data.recorded_at).toLocaleString("vi-VN")}
-                                                    </td>
-                                                </tr>
-                                            ))
+                                            sensorData.map((item) => {
+                                                const meta = dataLabels[item.sensor_type] || { label: item.sensor_type, unit: "" };
+                                                return (
+                                                    <tr key={item.id} className="border-t">
+                                                        <td className="px-4 py-3">
+                                                            <div className="font-medium">{item.sensor_name || meta.label}</div>
+                                                            <div className="text-xs text-muted-foreground">
+                                                                Mã cảm biến: {item.code} · Loại: {meta.label}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <div className="font-medium">{item.device_name}</div>
+                                                            <div className="text-xs text-muted-foreground">{item.device_id}</div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <div className="text-xs">
+                                                                <span className="font-medium">{meta.label}:</span>{" "}
+                                                                <span className="text-muted-foreground">
+                                                                    {item.value} {meta.unit}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            {new Date(item.recorded_at).toLocaleString("vi-VN")}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
                                         )}
                                     </tbody>
                                 </table>

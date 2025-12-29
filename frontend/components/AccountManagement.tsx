@@ -21,14 +21,19 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Trash, Pencil, Filter, KeyRound, Shield } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
+import { Trash, Pencil, Filter, KeyRound, Shield, MoreHorizontal, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Account } from "@/types/account";
 import { Toast, ToastSeverity } from "@/components/Toast";
 import { cn } from "@/lib/utils";
-import Header from "./Header";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -142,7 +147,13 @@ export default function AccountManagement() {
 
         setIsSubmitting(true);
         try {
-            const payload: any = {
+            type CreateAccountPayload = {
+                username: string;
+                role: Account["role"];
+                password?: string;
+            };
+
+            const payload: CreateAccountPayload = {
                 username: form.username,
                 role: form.role,
             };
@@ -328,13 +339,72 @@ export default function AccountManagement() {
         if (page > totalPages) setPage(totalPages);
     }, [page, totalPages]);
 
-    // Trạng thái loading spinner
-    if (loading || loadingAccounts) {
+    if (loading) {
         return (
-            <div className="p-6 flex items-center justify-center min-h-screen">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Đang tải dữ liệu...</p>
+            <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="space-y-2">
+                        <Skeleton className="h-9 w-64" />
+                        <Skeleton className="h-4 w-96" />
+                    </div>
+                    <Skeleton className="h-10 w-32" />
+                </div>
+
+                <div className="rounded-lg border bg-white p-4 shadow-sm">
+                    <div className="flex flex-col md:flex-row md:items-end gap-3">
+                        <div className="flex-1 space-y-1.5">
+                            <Skeleton className="h-4 w-32" />
+                            <Skeleton className="h-10 w-full" />
+                        </div>
+                        <div className="w-full md:w-40 space-y-1.5">
+                            <Skeleton className="h-4 w-16" />
+                            <Skeleton className="h-10 w-full" />
+                        </div>
+                        <Skeleton className="h-10 w-20" />
+                    </div>
+                </div>
+
+                <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    {[1, 2, 3, 4, 5].map((i) => (
+                                        <th key={i} className="px-4 py-3">
+                                            <Skeleton className="h-4 w-24" />
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[1, 2, 3, 4, 5].map((row) => (
+                                    <tr key={row} className="border-t">
+                                        {[1, 2, 3, 4, 5].map((col) => (
+                                            <td key={col} className="px-4 py-3">
+                                                {col === 1 ? (
+                                                    <div className="flex items-center gap-3">
+                                                        <Skeleton className="h-10 w-10 rounded-full" />
+                                                        <Skeleton className="h-4 w-24" />
+                                                    </div>
+                                                ) : (
+                                                    <Skeleton className="h-4 w-full" />
+                                                )}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                    <Skeleton className="h-4 w-48" />
+                    <div className="flex items-center gap-2">
+                        {[1, 2, 3, 4, 5].map((i) => (
+                            <Skeleton key={i} className="h-9 w-16" />
+                        ))}
+                    </div>
                 </div>
             </div>
         );
@@ -364,15 +434,14 @@ export default function AccountManagement() {
     }
 
     return (
-        <div className="p-6 space-y-4">
-            <div className="flex items-center justify-between">
-                <div className="flex flex-col gap-2">
+        <div className="space-y-4">
+            <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-1">
                     <h1 className="text-3xl font-bold">Quản lý tài khoản</h1>
                     <p className="text-sm text-muted-foreground">
                         Quản lý người dùng, phân quyền và bảo mật hệ thống.
                     </p>
                 </div>
-                <Header />
             </div>
             <div className="flex justify-end">
                 <Dialog
@@ -521,10 +590,13 @@ export default function AccountManagement() {
                             </tr>
                         </thead>
                         <tbody>
-                            {paginated.length === 0 && (
+                            {loadingAccounts && (
                                 <tr>
-                                    <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
-                                        Không có dữ liệu
+                                    <td colSpan={5} className="px-4 py-12">
+                                        <div className="flex flex-col items-center justify-center">
+                                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                                            <p className="text-gray-600">Đang tải danh sách tài khoản...</p>
+                                        </div>
                                     </td>
                                 </tr>
                             )}
@@ -559,58 +631,49 @@ export default function AccountManagement() {
                                             ? new Date(account.created_at).toLocaleString("vi-VN")
                                             : "N/A"}
                                     </td>
-                                    <td className="px-4 py-3 text-left space-x-2">
-                                        {account.id !== user?.id && (
-                                            <>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setEditing(account);
-                                                        setChangeRoleForm({ role: account.role });
-                                                        setOpenChangeRoleDialog(true);
-                                                    }}
-                                                >
-                                                    <Shield className="size-4" />
-                                                    Đổi role
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setEditing(account);
-                                                        setOpenResetPasswordDialog(true);
-                                                    }}
-                                                >
-                                                    <KeyRound className="size-4" />
-                                                    Đặt lại mật khẩu
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => handleEdit(account)}
-                                                >
-                                                    <Pencil className="size-4" />
-                                                    Sửa
-                                                </Button>
-                                                <Separator
-                                                    orientation="vertical"
-                                                    className="inline-block h-4 align-middle"
-                                                />
-                                                <Button
-                                                    variant="destructive"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setConfirmAccountId(account.id);
-                                                        setConfirmOpen(true);
-                                                    }}
-                                                >
-                                                    <Trash className="size-4" />
-                                                    Xóa
-                                                </Button>
-                                            </>
-                                        )}
-                                        {account.id === user?.id && (
+                                    <td className="px-4 py-3 text-left">
+                                        {account.id !== user?.id ? (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8"
+                                                    >
+                                                        <MoreHorizontal className="size-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem
+                                                        className="cursor-pointer hover:bg-gray-100"
+                                                        onClick={() => {
+                                                            setEditing(account);
+                                                            setOpenResetPasswordDialog(true);
+                                                        }}
+                                                    >
+                                                        <KeyRound className="mr-2 size-4" />
+                                                        <span>Đặt lại mật khẩu</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                        className="cursor-pointer hover:bg-gray-100"
+                                                        onClick={() => handleEdit(account)}
+                                                    >
+                                                        <Pencil className="mr-2 size-4" />
+                                                        <span>Sửa</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                        className="text-red-600 focus:text-red-600 cursor-pointer hover:bg-gray-100"
+                                                        onClick={() => {
+                                                            setConfirmAccountId(account.id);
+                                                            setConfirmOpen(true);
+                                                        }}
+                                                    >
+                                                        <Trash className="mr-2 size-4" />
+                                                        <span>Xóa</span>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        ) : (
                                             <span className="text-sm text-gray-500 italic">
                                                 Tài khoản của bạn
                                             </span>

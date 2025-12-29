@@ -142,22 +142,14 @@ const getSensorStatsForDashboard = async (req, res) => {
         const sql = `
             SELECT
                 ${dateTrunc} AS time_bucket,
-                sensor_type,
+                s.type AS sensor_type,
                 COUNT(*) AS count,
-                AVG(
-                    CASE sensor_type
-                        WHEN 'vibration' THEN NULLIF((data->>'vibration_g')::numeric, 0)
-                        WHEN 'rainfall' THEN NULLIF((data->>'rainfall_24h')::numeric, 0)
-                        WHEN 'humidity' THEN NULLIF((data->>'soil_moisture')::numeric, 0)
-                        WHEN 'position' THEN NULLIF((data->>'displacement_mm')::numeric, 0)
-                        WHEN 'slope' THEN NULLIF((data->>'slope_deg')::numeric, 0)
-                        ELSE NULL
-                    END
-                ) AS avg_value
-            FROM sensor_data_history
-            WHERE recorded_at >= NOW() - $1::interval
-                AND recorded_at < NOW()
-            GROUP BY time_bucket, sensor_type
+                AVG(h.value) AS avg_value
+            FROM sensor_data_history h
+            JOIN sensors s ON s.id = h.sensor_id
+            WHERE h.recorded_at >= NOW() - $1::interval
+                AND h.recorded_at < NOW()
+            GROUP BY time_bucket, s.type
             HAVING COUNT(*) > 0
             ORDER BY time_bucket ASC;
         `;
@@ -179,10 +171,12 @@ const getSensorStatsForDashboard = async (req, res) => {
 
         // Top thiết bị cập nhật nhiều nhất trong khoảng thời gian
         const topDevicesSql = `
-            SELECT device_id, COUNT(*) as samples
-            FROM sensor_data_history
-            WHERE recorded_at >= NOW() - $1::interval
-            GROUP BY device_id
+            SELECT d.device_id, COUNT(*) as samples
+            FROM sensor_data_history h
+            JOIN sensors s ON s.id = h.sensor_id
+            JOIN devices d ON d.id = s.device_id
+            WHERE h.recorded_at >= NOW() - $1::interval
+            GROUP BY d.device_id
             ORDER BY samples DESC
             LIMIT 5;
         `;

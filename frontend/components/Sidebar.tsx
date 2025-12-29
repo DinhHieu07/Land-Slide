@@ -41,7 +41,6 @@ export default function AppSidebar() {
 
             <SidebarContent>
                 <SidebarGroup>
-                    <SidebarGroupLabel>Điều hướng</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
                             <SidebarMenuItem>
@@ -52,6 +51,7 @@ export default function AppSidebar() {
                                     </Link>
                                 </SidebarMenuButton>
                             </SidebarMenuItem>
+                            <SidebarGroupLabel>Giám sát</SidebarGroupLabel>
                             {isAuthenticated && (
                                 <SidebarMenuItem>
                                     <SidebarMenuButton asChild>
@@ -62,6 +62,17 @@ export default function AppSidebar() {
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             )}
+                            {isAuthenticated && (
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton asChild>
+                                        <Link href="/alerts">
+                                            <Bell className="size-4" />
+                                            Cảnh báo
+                                        </Link>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            )}
+                            <SidebarGroupLabel>Quản lý thiết bị và dữ liệu</SidebarGroupLabel>
                             <SidebarMenuItem>
                                 <SidebarMenuButton asChild>
                                     <Link href="/map">
@@ -100,6 +111,7 @@ export default function AppSidebar() {
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             )}
+                            <SidebarGroupLabel>Quản lý tài khoản</SidebarGroupLabel>
                             {isSuperAdmin && (
                                 <SidebarMenuItem>
                                     <SidebarMenuButton asChild>
@@ -110,14 +122,6 @@ export default function AppSidebar() {
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             )}
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild>
-                                    <Link href="/alerts">
-                                        <Bell className="size-4" />
-                                        Cảnh báo
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
                         </SidebarMenu>
                     </SidebarGroupContent>
                 </SidebarGroup>
@@ -125,7 +129,7 @@ export default function AppSidebar() {
                 <SidebarSeparator />
 
                 <SidebarGroup>
-                  
+
                     <SidebarGroupContent>
                         <SidebarMenu>
                             {isAuthenticated ? (
@@ -145,7 +149,7 @@ export default function AppSidebar() {
                                 </>
                             ) : (
                                 <>
-                                    
+
                                 </>
                             )}
                         </SidebarMenu>
@@ -153,9 +157,9 @@ export default function AppSidebar() {
                 </SidebarGroup>
             </SidebarContent>
 
-            <SidebarFooter className="px-3 pb-3">
+            {/* <SidebarFooter className="px-3 pb-3">
                 <SidebarTrigger className="w-full justify-center" />
-            </SidebarFooter>
+            </SidebarFooter> */}
             <SidebarRail />
         </Sidebar>
     );

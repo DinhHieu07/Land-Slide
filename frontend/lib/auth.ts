@@ -57,7 +57,7 @@ export const authenticatedFetch = async (
     url: string,
     options: RequestInit = {}
 ): Promise<Response> => {
-    let accessToken = getAccessToken();
+    const accessToken = getAccessToken();
 
     // Thêm Authorization header
     const headers = {

@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const listDevices = async (req, res) => {
     try {
         const { search = '', status, provinceCode, limit = 10, offset = 0 } = req.query;
+        const { username } = req.query;
 
         const conditions = [];
         const values = [];
@@ -23,6 +24,19 @@ const listDevices = async (req, res) => {
             conditions.push(`p.code = $${values.length}`);
         }
 
+        // superAdmin có thể xem tất cả thiết bị
+        let usernameJoin = '';
+        const userRole = req.user?.role;
+        const isSuperAdmin = userRole === 'superAdmin';
+        
+        if (username && !isSuperAdmin) {
+            values.push(username);
+            usernameJoin = `
+                INNER JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                INNER JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
+            `;
+        }
+
         const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
         // Đếm tổng thiết bị theo filter
@@ -30,6 +44,7 @@ const listDevices = async (req, res) => {
             SELECT COUNT(*) as total
             FROM devices d
             LEFT JOIN provinces p ON d.province_id = p.id
+            ${usernameJoin}
             ${whereClause}
         `;
         const countResult = await pool.query(countQuery, values);
@@ -53,9 +68,25 @@ const listDevices = async (req, res) => {
                 d.updated_at,
                 d.province_id,
                 p.name AS province_name,
-                p.code AS province_code
+                p.code AS province_code,
+                mgr.managers
             FROM devices d
             LEFT JOIN provinces p ON d.province_id = p.id
+            ${usernameJoin}
+            LEFT JOIN LATERAL (
+                SELECT 
+                    json_agg(
+                        json_build_object(
+                            'id', u.id,
+                            'username', u.username,
+                            'avatar', u.avatar
+                        )
+                        ORDER BY u.id
+                    ) AS managers
+                FROM user_provinces up
+                JOIN users u ON u.id = up.user_id
+                WHERE up.province_id = d.province_id
+            ) AS mgr ON TRUE
             ${whereClause}
             ORDER BY d.id ASC
             LIMIT $${values.length - 1} OFFSET $${values.length}
@@ -96,9 +127,24 @@ const getDeviceById = async (req, res) => {
                 d.updated_at,
                 d.province_id,
                 p.name AS province_name,
-                p.code AS province_code
+                p.code AS province_code,
+                mgr.managers
             FROM devices d
             LEFT JOIN provinces p ON d.province_id = p.id
+            LEFT JOIN LATERAL (
+                SELECT 
+                    json_agg(
+                        json_build_object(
+                            'id', u.id,
+                            'username', u.username,
+                            'avatar', u.avatar
+                        )
+                        ORDER BY u.id
+                    ) AS managers
+                FROM user_provinces up
+                JOIN users u ON u.id = up.user_id
+                WHERE up.province_id = d.province_id
+            ) AS mgr ON TRUE
             WHERE d.device_id = $1 OR d.id::text = $1
             LIMIT 1
         `;
@@ -116,7 +162,7 @@ const getDeviceById = async (req, res) => {
 // Tạo thiết bị
 const createDevice = async (req, res) => {
     try {
-        const { device_id, name, status = 'offline', lat, lon, latest_data, province_id, area_id } = req.body;
+        const { device_id, name, status = 'online', lat, lon, latest_data, province_id, area_id } = req.body;
 
         if (!device_id || !name || lat === undefined || lon === undefined) {
             return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc' });
@@ -138,8 +184,47 @@ const createDevice = async (req, res) => {
             area_id || null,
         ];
         const result = await pool.query(query, values);
+        const device = result.rows[0];
 
-        return res.status(201).json({ success: true, data: result.rows[0] });
+        // Query lại device với thông tin đầy đủ từ provinces và managers
+        const fullDeviceQuery = `
+            SELECT
+                d.id,
+                d.device_id,
+                d.name,
+                d.status,
+                d.lat,
+                d.lon,
+                d.last_seen,
+                d.latest_data,
+                d.created_at,
+                d.updated_at,
+                d.province_id,
+                p.name AS province_name,
+                p.code AS province_code,
+                mgr.managers
+            FROM devices d
+            LEFT JOIN provinces p ON d.province_id = p.id
+            LEFT JOIN LATERAL (
+                SELECT 
+                    json_agg(
+                        json_build_object(
+                            'id', u.id,
+                            'username', u.username,
+                            'avatar', u.avatar
+                        )
+                        ORDER BY u.id
+                    ) AS managers
+                FROM user_provinces up
+                JOIN users u ON u.id = up.user_id
+                WHERE up.province_id = d.province_id
+            ) AS mgr ON TRUE
+            WHERE d.id = $1
+        `;
+        const fullDeviceResult = await pool.query(fullDeviceQuery, [device.id]);
+        const fullDevice = fullDeviceResult.rows[0] || device;
+
+        return res.status(201).json({ success: true, data: fullDevice });
     } catch (error) {
         console.error('createDevice error:', error);
         return res.status(500).json({ success: false, message: 'Lỗi server' });

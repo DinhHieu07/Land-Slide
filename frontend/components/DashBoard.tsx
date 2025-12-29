@@ -11,19 +11,20 @@ import {
     AlertTriangle,
     MapPin,
     Radio,
-    TrendingUp,
-    Users,
     Wifi,
-    WifiOff,
     AlertCircle,
     Settings,
-    BarChart3,
     Zap,
-    Thermometer,
     Droplets,
     CloudRain,
     Gauge,
     Cpu,
+    RefreshCw,
+    XCircle,
+    Clock,
+    CheckCircle,
+    Info,
+    History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -34,11 +35,8 @@ import {
     XAxis,
     YAxis,
     CartesianGrid,
-    ResponsiveContainer,
-    Tooltip,
 } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import Header from "@/components/Header";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -81,6 +79,16 @@ type SensorSeries = Record<
     }>
 >;
 
+type AlertStats = {
+    active_count: number;
+    acknowledged_count: number;
+    resolved_count: number;
+    critical_count: number;
+    warning_count: number;
+    info_count: number;
+    total_count: number;
+};
+
 export default function DashboardView() {
     const router = useRouter();
     const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -89,11 +97,25 @@ export default function DashboardView() {
     const [sensorSeries, setSensorSeries] = useState<SensorSeries>({});
     const [topDevices, setTopDevices] = useState<Array<{ device_id: string; samples: number }>>([]);
     const [loadingSensor, setLoadingSensor] = useState(true);
+    const [alertStats, setAlertStats] = useState<AlertStats | null>(null);
+    const [loadingAlertStats, setLoadingAlertStats] = useState(true);
+
+    // Lấy username từ localStorage (nếu có)
+    const getUsername = () => {
+        try {
+            const user = JSON.parse(localStorage.getItem("user") || "{}");
+            return user?.username || null;
+        } catch {
+            return null;
+        }
+    };
+    const username = getUsername();
 
     useEffect(() => {
         if (isAuthenticated && isAdmin) {
             fetchStats();
             fetchSensorStats();
+            fetchAlertStats();
         }
     }, [isAuthenticated, isAdmin]);
 
@@ -142,6 +164,25 @@ export default function DashboardView() {
         }
     };
 
+    const fetchAlertStats = async () => {
+        try {
+            setLoadingAlertStats(true);
+            const params = new URLSearchParams();
+            if (username) params.append("username", username);
+            const res = await authenticatedFetch(`${API_URL}/api/alerts/stats?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setAlertStats(data.data);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy thống kê cảnh báo:", error);
+        } finally {
+            setLoadingAlertStats(false);
+        }
+    };
+
     if (!isAuthenticated || !isAdmin) {
         return (
             <div className="p-6">
@@ -178,7 +219,7 @@ export default function DashboardView() {
     }
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="space-y-6">
 
             <div className="flex items-center justify-between">
                 <div>
@@ -187,11 +228,10 @@ export default function DashboardView() {
                         Tổng quan hệ thống giám sát sạt lở đất
                     </p>
                 </div>
-                <Header />
             </div>
             <div className="flex gap-2 justify-end">
-                <Button onClick={() => { fetchStats(); fetchSensorStats(); }} variant="outline">
-                    <BarChart3 className="size-4 mr-2" />
+                <Button onClick={() => { fetchStats(); fetchSensorStats(); fetchAlertStats(); }} variant="outline">
+                    <RefreshCw className="size-4 mr-2" />
                     Làm mới
                 </Button>
             </div>
@@ -233,9 +273,11 @@ export default function DashboardView() {
                         <AlertTriangle className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{stats.alerts.total}</div>
+                        <div className="text-2xl font-bold">
+                            {loadingAlertStats ? "..." : (alertStats?.total_count || stats.alerts.total || 0)}
+                        </div>
                         <p className="text-xs text-muted-foreground">
-                            Tổng số cảnh báo hệ thống
+                            {alertStats?.active_count ? `${alertStats.active_count} đang bị lỗi` : "Tổng số cảnh báo hệ thống"}
                         </p>
                     </CardContent>
                 </Card>
@@ -255,6 +297,101 @@ export default function DashboardView() {
                 </Card>
             </div>
 
+            {/* Thống kê cảnh báo chi tiết */}
+            {alertStats && (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <Card className="border-l-4 border-l-red-500">
+                        <CardHeader className="pb-2">
+                            <CardDescription>Đang bị lỗi</CardDescription>
+                            <CardTitle className="text-3xl font-bold text-red-600">{alertStats.active_count}</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <AlertTriangle className="size-4 text-red-500" />
+                                <span>Cần xử lý ngay</span>
+                            </div>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-l-4 border-l-amber-500">
+                        <CardHeader className="pb-2">
+                            <CardDescription>Cảnh báo nghiêm trọng</CardDescription>
+                            <CardTitle className="text-3xl font-bold text-amber-600">{alertStats.critical_count}</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <XCircle className="size-4 text-amber-500" />
+                                <span>Mức độ cao</span>
+                            </div>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-l-4 border-l-yellow-500">
+                        <CardHeader className="pb-2">
+                            <CardDescription>Đã xác nhận</CardDescription>
+                            <CardTitle className="text-3xl font-bold text-yellow-600">{alertStats.acknowledged_count}</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Clock className="size-4 text-yellow-500" />
+                                <span>Đang xử lý</span>
+                            </div>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-l-4 border-l-green-500">
+                        <CardHeader className="pb-2">
+                            <CardDescription>Đã xử lý</CardDescription>
+                            <CardTitle className="text-3xl font-bold text-green-600">{alertStats.resolved_count}</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <CheckCircle className="size-4 text-green-500" />
+                                <span>Hoàn thành</span>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
+
+            {/* Phân bố cảnh báo theo mức độ */}
+            {alertStats && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Phân bố cảnh báo theo mức độ</CardTitle>
+                        <CardDescription>Thống kê cảnh báo theo mức độ nghiêm trọng</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid gap-4 md:grid-cols-3">
+                            <div className="rounded-lg border p-4 bg-red-50 border-red-200">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <XCircle className="h-5 w-5 text-red-600" />
+                                        <span className="text-sm font-medium">Nghiêm trọng</span>
+                                    </div>
+                                    <span className="text-2xl font-bold text-red-600">{alertStats.critical_count}</span>
+                                </div>
+                            </div>
+                            <div className="rounded-lg border p-4 bg-amber-50 border-amber-200">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle className="h-5 w-5 text-amber-600" />
+                                        <span className="text-sm font-medium">Cảnh báo</span>
+                                    </div>
+                                    <span className="text-2xl font-bold text-amber-600">{alertStats.warning_count}</span>
+                                </div>
+                            </div>
+                            <div className="rounded-lg border p-4 bg-blue-50 border-blue-200">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Info className="h-5 w-5 text-blue-600" />
+                                        <span className="text-sm font-medium">Thông tin</span>
+                                    </div>
+                                    <span className="text-2xl font-bold text-blue-600">{alertStats.info_count}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Trạng thái thiết bị */}
             <div className="grid gap-4 md:grid-cols-2">
                 <Card>
@@ -267,7 +404,7 @@ export default function DashboardView() {
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <Wifi className="h-4 w-4 text-emerald-600" />
-                                    <span className="text-sm">Online</span>
+                                    <span className="text-sm">Hoạt động</span>
                                 </div>
                                 <span className="font-semibold">{stats.devices.online}</span>
                             </div>
@@ -279,7 +416,7 @@ export default function DashboardView() {
                             </div>
                         </div>
 
-                        <div className="space-y-2">
+                        {/* <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <WifiOff className="h-4 w-4 text-gray-600" />
@@ -293,7 +430,7 @@ export default function DashboardView() {
                                     style={{ width: `${stats.devices.total > 0 ? (stats.devices.offline / stats.devices.total) * 100 : 0}%` }}
                                 />
                             </div>
-                        </div>
+                        </div> */}
 
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
@@ -406,11 +543,11 @@ export default function DashboardView() {
                                 const maxSamples = maxCountByType[type] || 0;
 
                                 const colorMap: Record<string, string> = {
-                                    rainfall: "hsl(221.2 83.2% 53.3%)",
-                                    humidity: "hsl(142.1 76.2% 36.3%)",
-                                    vibration: "hsl(0 84.2% 60.2%)",
-                                    position: "hsl(262.1 83.3% 57.8%)",
-                                    slope: "hsl(43.3 96.4% 56.3%)",
+                                    rainfall_24h: "hsl(221.2 83.2% 53.3%)",
+                                    soil_moisture: "hsl(142.1 76.2% 36.3%)",
+                                    vibration_g: "hsl(0 84.2% 60.2%)",
+                                    tilt_deg: "hsl(262.1 83.3% 57.8%)",
+                                    slope_deg: "hsl(43.3 96.4% 56.3%)",
                                 };
                                 const barColor = colorMap[type] || "hsl(221.2 83.2% 53.3%)";
 
@@ -424,22 +561,22 @@ export default function DashboardView() {
                                 return (
                                     <div key={type} className="space-y-3">
                                         <div className="flex items-center gap-2">
-                                            {type === "rainfall" && <CloudRain className="h-5 w-5 text-blue-600" />}
-                                            {type === "humidity" && <Droplets className="h-5 w-5 text-emerald-600" />}
-                                            {type === "vibration" && <Activity className="h-5 w-5 text-red-600" />}
-                                            {type === "position" && <Cpu className="h-5 w-5 text-indigo-600" />}
-                                            {type === "slope" && <Gauge className="h-5 w-5 text-amber-600" />}
+                                            {type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
+                                            {type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
+                                            {type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
+                                            {type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
+                                            {type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
                                             <span className="text-base font-semibold text-slate-900">
-                                                {type === "vibration"
-                                                    ? "Cảm biến rung"
-                                                    : type === "rainfall"
-                                                    ? "Lượng mưa"
-                                                    : type === "humidity"
-                                                    ? "Độ ẩm"
-                                                    : type === "position"
-                                                    ? "Vị trí"
-                                                    : type === "slope"
-                                                    ? "Độ dốc"
+                                                {type === "vibration_g"
+                                                    ? "Cảm biến rung (g)"
+                                                    : type === "rainfall_24h"
+                                                    ? "Lượng mưa 24h (mm)"
+                                                    : type === "soil_moisture"
+                                                    ? "Độ ẩm đất (%)"
+                                                    : type === "tilt_deg"
+                                                    ? "Độ nghiêng (°)"
+                                                    : type === "slope_deg"
+                                                    ? "Độ dốc (°)"
                                                     : type}
                                             </span>
                                         </div>
@@ -546,20 +683,20 @@ export default function DashboardView() {
                                     });
 
                                 const unitLabels: Record<string, string> = {
-                                    rainfall: "mm",
-                                    humidity: "%",
-                                    vibration: "g",
-                                    position: "mm",
-                                    slope: "°",
+                                    rainfall_24h: "mm",
+                                    soil_moisture: "%",
+                                    vibration_g: "g",
+                                    tilt_deg: "°",
+                                    slope_deg: "°",
                                 };
                                 const unit = unitLabels[type] || "";
 
                                 const colorMap: Record<string, string> = {
-                                    rainfall: "hsl(221.2 83.2% 53.3%)",
-                                    humidity: "hsl(142.1 76.2% 36.3%)",
-                                    vibration: "hsl(0 84.2% 60.2%)",
-                                    position: "hsl(262.1 83.3% 57.8%)",
-                                    slope: "hsl(43.3 96.4% 56.3%)",
+                                    rainfall_24h: "hsl(221.2 83.2% 53.3%)",
+                                    soil_moisture: "hsl(142.1 76.2% 36.3%)",
+                                    vibration_g: "hsl(0 84.2% 60.2%)",
+                                    tilt_deg: "hsl(262.1 83.3% 57.8%)",
+                                    slope_deg: "hsl(43.3 96.4% 56.3%)",
                                 };
                                 const areaColor = colorMap[type] || "hsl(221.2 83.2% 53.3%)";
 
@@ -784,6 +921,14 @@ export default function DashboardView() {
                         <Button variant="outline" onClick={() => router.push('/map')} className="h-auto flex-col py-4">
                             <MapPin className="h-5 w-5 mb-2" />
                             <span>Xem bản đồ</span>
+                        </Button>
+                        <Button variant="outline" onClick={() => router.push('/alerts')} className="h-auto flex-col py-4">
+                            <AlertTriangle className="h-5 w-5 mb-2" />
+                            <span>Quản lý cảnh báo</span>
+                        </Button>
+                        <Button variant="outline" onClick={() => router.push('/history')} className="h-auto flex-col py-4">
+                            <History className="h-5 w-5 mb-2" />
+                            <span>Lịch sử cảnh báo</span>
                         </Button>
                     </div>
                 </CardContent>

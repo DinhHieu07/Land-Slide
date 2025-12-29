@@ -16,9 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Toast } from "./Toast";
 import { setAccessToken } from "@/lib/auth";
+import type { User } from "@/hooks/useAuth";
 
 interface LoginDialogProps {
-    onLoginSuccess?: (user: any, accessToken: string) => void;
+    onLoginSuccess?: (user: User, accessToken: string) => void;
 }
 
 export function LoginDialog({ onLoginSuccess }: LoginDialogProps) {

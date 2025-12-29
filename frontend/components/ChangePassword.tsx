@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
     Dialog,
     DialogContent,
@@ -9,8 +8,8 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Toast } from "@/components/Toast";
@@ -18,8 +17,12 @@ import { authenticatedFetch } from "@/lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-export default function ChangePassword() {
-    const [open, setOpen] = useState(false);
+interface ChangePasswordProps {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+}
+
+export default function ChangePassword({ open, onOpenChange }: ChangePasswordProps) {
     const [currentPassword, setCurrentPassword] = useState("");
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
@@ -59,7 +62,7 @@ export default function ChangePassword() {
                 setToastMessage("Đổi mật khẩu thành công");
                 setToastSeverity("success");
                 setToastOpen(true);
-                setOpen(false);
+                onOpenChange(false);
                 setCurrentPassword("");
                 setNewPassword("");
                 setConfirmPassword("");
@@ -80,12 +83,7 @@ export default function ChangePassword() {
 
     return (
         <>
-            <Dialog open={open} onOpenChange={setOpen}>
-                <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="whitespace-nowrap">
-                        Đổi mật khẩu
-                    </Button>
-                </DialogTrigger>
+            <Dialog open={open} onOpenChange={onOpenChange}>
                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
                         <DialogTitle>Đổi mật khẩu</DialogTitle>

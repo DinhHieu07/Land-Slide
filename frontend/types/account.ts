@@ -1,3 +1,5 @@
+import { Province } from "./province";
+
 export interface Account {
     id: number;
     username: string;
@@ -5,4 +7,5 @@ export interface Account {
     avatar: string;
     created_at: string;
     updated_at?: string;
+    provinces?: Province[];
 }

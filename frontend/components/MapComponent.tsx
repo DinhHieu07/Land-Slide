@@ -77,7 +77,7 @@ function MapController({ center, zoom }: { center: [number, number]; zoom: numbe
 }
 
 export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevice?: FocusDevice; onDeviceFocus?: (device: FocusDevice) => void }) {
-    const { isAuthenticated } = useAuth();
+    const { isAuthenticated, user } = useAuth();
     const [center, setCenter] = useState<[number, number]>([21.0285, 105.8542]);
     const [zoom, setZoom] = useState(8);
     const [devices, setDevices] = useState<DeviceMarker[]>([]);
@@ -86,6 +86,9 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
     const [provinces, setProvinces] = useState<Province[]>([]);
     const focusMarkerRef = useRef<any>(null);
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+    const username = user?.username;
+    console.log(username);
 
     // Sử dụng focusDevice từ prop hoặc localFocusDevice
     const [currentFocusDevice, setCurrentFocusDevice] = useState<FocusDevice | undefined>(focusDevice || undefined);
@@ -100,7 +103,7 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
     useEffect(() => {
         const fetchDevices = async () => {
             try {
-                const response = await authenticatedFetch(`${API_URL}/api/devices?limit=1000&offset=0`, { method: "GET" });
+                const response = await authenticatedFetch(`${API_URL}/api/devices?username=${username}&limit=1000&offset=0`, { method: "GET" });
                 const data = await response.json();
                 if (response.ok && data.success) {
                     setDevices(data.data || []);
@@ -117,8 +120,9 @@ export default function MapComponent({ focusDevice, onDeviceFocus }: { focusDevi
     useEffect(() => {
         const fetchProvinces = async () => {
             try {
-                const res = await fetch(`${API_URL}/api/provinces/list-provinces`);
+                const res = await authenticatedFetch(`${API_URL}/api/provinces/list-provinces/${username}`);
                 const data = await res.json();
+                console.log(data);
                 if (res.ok && data?.success) {
                     setProvinces(data.data || []);
                 } else {

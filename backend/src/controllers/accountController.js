@@ -336,6 +336,275 @@ const changeRole = async (req, res) => {
     }
 };
 
+// Lấy danh sách tỉnh thành của một account
+const getAccountProvinces = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Kiểm tra tài khoản có tồn tại không
+        const checkAccount = await pool.query(
+            'SELECT id, username, role FROM users WHERE id = $1',
+            [id]
+        );
+
+        if (checkAccount.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản' });
+        }
+
+        const account = checkAccount.rows[0];
+
+        // Nếu là superAdmin, trả về tất cả tỉnh thành
+        if (account.role === 'superAdmin') {
+            const allProvinces = await pool.query(
+                'SELECT id, name, code FROM provinces ORDER BY id'
+            );
+            return res.json({
+                success: true,
+                data: allProvinces.rows,
+                isSuperAdmin: true
+            });
+        }
+
+        // Lấy danh sách tỉnh thành của account
+        const result = await pool.query(
+            `SELECT p.id, p.name, p.code 
+             FROM provinces p
+             INNER JOIN user_provinces up ON p.id = up.province_id
+             WHERE up.user_id = $1
+             ORDER BY p.id`,
+            [id]
+        );
+
+        return res.json({
+            success: true,
+            data: result.rows,
+            isSuperAdmin: false
+        });
+    } catch (error) {
+        console.error('getAccountProvinces error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
+// Cập nhật danh sách tỉnh thành của account (thay thế toàn bộ)
+const updateAccountProvinces = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { provinceIds } = req.body;
+
+        // Kiểm tra tài khoản có tồn tại không
+        const checkAccount = await pool.query(
+            'SELECT id, username, role FROM users WHERE id = $1',
+            [id]
+        );
+
+        if (checkAccount.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản' });
+        }
+
+        const account = checkAccount.rows[0];
+
+        // SuperAdmin không cần quản lý tỉnh thành (quản lý tất cả)
+        if (account.role === 'superAdmin') {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'SuperAdmin quản lý tất cả tỉnh thành, không cần cập nhật' 
+            });
+        }
+
+        // Validate provinceIds
+        if (!Array.isArray(provinceIds)) {
+            return res.status(400).json({ success: false, message: 'provinceIds phải là mảng' });
+        }
+
+        // Kiểm tra tất cả provinceIds có tồn tại không
+        if (provinceIds.length > 0) {
+            const placeholders = provinceIds.map((_, index) => `$${index + 1}`).join(',');
+            const checkProvinces = await pool.query(
+                `SELECT id FROM provinces WHERE id IN (${placeholders})`,
+                provinceIds
+            );
+
+            if (checkProvinces.rows.length !== provinceIds.length) {
+                return res.status(400).json({ success: false, message: 'Một hoặc nhiều tỉnh thành không tồn tại' });
+            }
+        }
+
+        // Bắt đầu transaction
+        await pool.query('BEGIN');
+
+        try {
+            // Xóa tất cả tỉnh thành hiện tại của account
+            await pool.query('DELETE FROM user_provinces WHERE user_id = $1', [id]);
+
+            // Thêm các tỉnh thành mới
+            if (provinceIds.length > 0) {
+                const insertValues = provinceIds.map((provinceId, index) => 
+                    `($${index * 2 + 1}, $${index * 2 + 2})`
+                ).join(', ');
+                
+                const insertParams = [];
+                provinceIds.forEach(provinceId => {
+                    insertParams.push(id, provinceId);
+                });
+
+                await pool.query(
+                    `INSERT INTO user_provinces (user_id, province_id) VALUES ${insertValues}`,
+                    insertParams
+                );
+            }
+
+            await pool.query('COMMIT');
+
+            // Lấy lại danh sách tỉnh thành đã cập nhật
+            const updatedProvinces = await pool.query(
+                `SELECT p.id, p.name, p.code 
+                 FROM provinces p
+                 INNER JOIN user_provinces up ON p.id = up.province_id
+                 WHERE up.user_id = $1
+                 ORDER BY p.id`,
+                [id]
+            );
+
+            return res.json({
+                success: true,
+                message: 'Cập nhật tỉnh thành thành công',
+                data: updatedProvinces.rows
+            });
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+    } catch (error) {
+        console.error('updateAccountProvinces error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
+// Thêm một tỉnh thành cho account
+const addAccountProvince = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { provinceId } = req.body;
+
+        // Kiểm tra tài khoản có tồn tại không
+        const checkAccount = await pool.query(
+            'SELECT id, username, role FROM users WHERE id = $1',
+            [id]
+        );
+
+        if (checkAccount.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản' });
+        }
+
+        const account = checkAccount.rows[0];
+
+        // SuperAdmin không cần quản lý tỉnh thành
+        if (account.role === 'superAdmin') {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'SuperAdmin quản lý tất cả tỉnh thành' 
+            });
+        }
+
+        if (!provinceId) {
+            return res.status(400).json({ success: false, message: 'Thiếu provinceId' });
+        }
+
+        // Kiểm tra tỉnh thành có tồn tại không
+        const checkProvince = await pool.query(
+            'SELECT id FROM provinces WHERE id = $1',
+            [provinceId]
+        );
+
+        if (checkProvince.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tỉnh thành' });
+        }
+
+        // Kiểm tra đã tồn tại chưa
+        const checkExists = await pool.query(
+            'SELECT id FROM user_provinces WHERE user_id = $1 AND province_id = $2',
+            [id, provinceId]
+        );
+
+        if (checkExists.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'Tỉnh thành đã được thêm vào tài khoản này' });
+        }
+
+        // Thêm tỉnh thành
+        await pool.query(
+            'INSERT INTO user_provinces (user_id, province_id) VALUES ($1, $2)',
+            [id, provinceId]
+        );
+
+        // Lấy thông tin tỉnh thành vừa thêm
+        const province = await pool.query(
+            'SELECT id, name, code FROM provinces WHERE id = $1',
+            [provinceId]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Thêm tỉnh thành thành công',
+            data: province.rows[0]
+        });
+    } catch (error) {
+        console.error('addAccountProvince error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
+// Xóa một tỉnh thành khỏi account
+const removeAccountProvince = async (req, res) => {
+    try {
+        const { id, provinceId } = req.params;
+
+        // Kiểm tra tài khoản có tồn tại không
+        const checkAccount = await pool.query(
+            'SELECT id, username, role FROM users WHERE id = $1',
+            [id]
+        );
+
+        if (checkAccount.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản' });
+        }
+
+        const account = checkAccount.rows[0];
+
+        // SuperAdmin không cần quản lý tỉnh thành
+        if (account.role === 'superAdmin') {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'SuperAdmin quản lý tất cả tỉnh thành' 
+            });
+        }
+
+        // Kiểm tra tỉnh thành có trong danh sách của account không
+        const checkExists = await pool.query(
+            'SELECT id FROM user_provinces WHERE user_id = $1 AND province_id = $2',
+            [id, provinceId]
+        );
+
+        if (checkExists.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Tỉnh thành không có trong danh sách quản lý của tài khoản này' });
+        }
+
+        // Xóa tỉnh thành
+        await pool.query(
+            'DELETE FROM user_provinces WHERE user_id = $1 AND province_id = $2',
+            [id, provinceId]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Xóa tỉnh thành thành công'
+        });
+    } catch (error) {
+        console.error('removeAccountProvince error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
 module.exports = {
     listAccounts,
     getAccountById,
@@ -343,5 +612,9 @@ module.exports = {
     updateAccount,
     deleteAccount,
     resetPassword,
-    changeRole
+    changeRole,
+    getAccountProvinces,
+    updateAccountProvinces,
+    addAccountProvince,
+    removeAccountProvince
 };

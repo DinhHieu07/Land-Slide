@@ -103,7 +103,7 @@ const login = async (req, res) => {
         const cookieOptions = {
             httpOnly: true, // Không cho JavaScript truy cập
             secure: process.env.NODE_ENV === 'production', // Chỉ gửi qua HTTPS trong production
-            sameSite: 'lax', // Bảo vệ khỏi CSRF
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Bảo vệ khỏi CSRF
             maxAge: 7 * 24 * 60 * 60 * 1000, 
             path: '/', // Cookie có hiệu lực cho toàn bộ site
         };
@@ -195,7 +195,7 @@ const logout = async (req, res) => {
         res.clearCookie('refreshToken', {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
             path: '/',
         });
 

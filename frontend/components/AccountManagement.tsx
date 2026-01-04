@@ -21,9 +21,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Trash, Pencil, Filter, KeyRound, Shield, MoreHorizontal, ArrowLeft } from "lucide-react";
+import { Trash, Pencil, Filter, KeyRound, Shield, MoreHorizontal, ArrowLeft, MapPin } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Account } from "@/types/account";
+import { Province } from "@/types/province";
 import { Toast, ToastSeverity } from "@/components/Toast";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -34,6 +35,7 @@ import {
     DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -57,7 +59,11 @@ export default function AccountManagement() {
     const [openDialog, setOpenDialog] = useState(false);
     const [openResetPasswordDialog, setOpenResetPasswordDialog] = useState(false);
     const [openChangeRoleDialog, setOpenChangeRoleDialog] = useState(false);
+    const [openManageProvincesDialog, setOpenManageProvincesDialog] = useState(false);
     const [editing, setEditing] = useState<Account | null>(null);
+    const [allProvinces, setAllProvinces] = useState<Province[]>([]);
+    const [selectedProvinceIds, setSelectedProvinceIds] = useState<number[]>([]);
+    const [loadingProvinces, setLoadingProvinces] = useState(false);
     const [form, setForm] = useState({
         username: "",
         password: "",
@@ -127,8 +133,104 @@ export default function AccountManagement() {
     useEffect(() => {
         if (isAuthenticated && isSuperAdmin) {
             fetchAccounts();
+            fetchAllProvinces();
         }
     }, [isAuthenticated, isSuperAdmin, debouncedSearch, page, roleFilter]);
+
+    const fetchAllProvinces = async () => {
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/provinces/list-provinces/${user?.username || ''}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                setAllProvinces(data.data || []);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách tỉnh thành", error);
+        }
+    };
+
+    const fetchAccountProvinces = async (accountId: number) => {
+        if (!editing || editing.role === 'superAdmin') {
+            // SuperAdmin không cần fetch
+            setLoadingProvinces(false);
+            return;
+        }
+
+        setLoadingProvinces(true);
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/accounts/${accountId}/provinces`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                setSelectedProvinceIds(data.data?.map((p: Province) => p.id) || []);
+            } else {
+                setToastMessage(data?.message || "Không thể tải danh sách tỉnh thành");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách tỉnh thành", error);
+            setToastMessage("Lỗi kết nối máy chủ");
+            setToastSeverity("error");
+            setToastOpen(true);
+        } finally {
+            setLoadingProvinces(false);
+        }
+    };
+
+    const handleManageProvinces = (account: Account) => {
+        setEditing(account);
+        setOpenManageProvincesDialog(true);
+        fetchAccountProvinces(account.id);
+    };
+
+    const handleUpdateProvinces = async () => {
+        if (!editing) return;
+
+        // SuperAdmin không cần cập nhật
+        if (editing.role === 'superAdmin') {
+            setToastMessage("SuperAdmin quản lý tất cả tỉnh thành");
+            setToastSeverity("info");
+            setToastOpen(true);
+            setOpenManageProvincesDialog(false);
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/accounts/${editing.id}/provinces`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    provinceIds: selectedProvinceIds,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setToastMessage("Cập nhật tỉnh thành thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+                setOpenManageProvincesDialog(false);
+                fetchAccounts();
+            } else {
+                setToastMessage(data?.message || "Cập nhật tỉnh thành thất bại");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (err) {
+            console.error(err);
+            setToastMessage("Lỗi kết nối máy chủ");
+            setToastSeverity("error");
+            setToastOpen(true);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
     const handleSubmit = async () => {
         if (!form.username || (!editing && !form.password)) {
@@ -662,6 +764,13 @@ export default function AccountManagement() {
                                                         <span>Sửa</span>
                                                     </DropdownMenuItem>
                                                     <DropdownMenuItem
+                                                        className="cursor-pointer hover:bg-gray-100"
+                                                        onClick={() => handleManageProvinces(account)}
+                                                    >
+                                                        <MapPin className="mr-2 size-4" />
+                                                        <span>Quản lý tỉnh thành</span>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
                                                         className="text-red-600 focus:text-red-600 cursor-pointer hover:bg-gray-100"
                                                         onClick={() => {
                                                             setConfirmAccountId(account.id);
@@ -853,6 +962,113 @@ export default function AccountManagement() {
                         <Button onClick={handleChangeRole} disabled={isSubmitting}>
                             {isSubmitting ? "Đang xử lý..." : "Thay đổi"}
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog quản lý tỉnh thành */}
+            <Dialog
+                open={openManageProvincesDialog}
+                onOpenChange={(open) => {
+                    setOpenManageProvincesDialog(open);
+                    if (!open) {
+                        setSelectedProvinceIds([]);
+                    }
+                }}
+            >
+                <DialogContent className="max-h-[90vh] overflow-y-auto max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Quản lý tỉnh thành</DialogTitle>
+                        <DialogDescription>
+                            {editing?.role === 'superAdmin' 
+                                ? `Tài khoản ${editing?.username} là SuperAdmin và quản lý tất cả tỉnh thành.`
+                                : `Chọn các tỉnh thành mà tài khoản ${editing?.username} được quản lý.`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {editing?.role === 'superAdmin' ? (
+                        <div className="py-4">
+                            <div className="rounded-lg border bg-blue-50 p-4">
+                                <p className="text-sm text-blue-800">
+                                    SuperAdmin có quyền quản lý tất cả tỉnh thành trong hệ thống. 
+                                    Không cần cấu hình thêm.
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {loadingProvinces ? (
+                                <div className="flex items-center justify-center py-8">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="flex items-center justify-between border-b pb-2">
+                                        <Label className="text-base font-semibold">
+                                            Danh sách tỉnh thành ({selectedProvinceIds.length}/{allProvinces.length})
+                                        </Label>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                    if (selectedProvinceIds.length === allProvinces.length) {
+                                                        setSelectedProvinceIds([]);
+                                                    } else {
+                                                        setSelectedProvinceIds(allProvinces.map(p => p.id));
+                                                    }
+                                                }}
+                                            >
+                                                {selectedProvinceIds.length === allProvinces.length 
+                                                    ? "Bỏ chọn tất cả" 
+                                                    : "Chọn tất cả"}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <div className="max-h-[400px] overflow-y-auto space-y-2 border rounded-lg p-4">
+                                        {allProvinces.length === 0 ? (
+                                            <p className="text-sm text-gray-500 text-center py-4">
+                                                Không có tỉnh thành nào
+                                            </p>
+                                        ) : (
+                                            allProvinces.map((province) => (
+                                                <div
+                                                    key={province.id}
+                                                    className="flex items-center space-x-2 p-2 rounded hover:bg-gray-50 transition-colors "
+                                                >
+                                                    <Checkbox
+                                                        checked={selectedProvinceIds.includes(province.id)}
+                                                        onCheckedChange={(checked) => {
+                                                            if (checked) {
+                                                                setSelectedProvinceIds(prev => [...prev, province.id]);
+                                                            } else {
+                                                                setSelectedProvinceIds(prev => prev.filter(id => id !== province.id));
+                                                            }
+                                                        }}
+                                                    />
+                                                    <Label>{province.name}</Label>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button 
+                            variant="outline" 
+                            onClick={() => setOpenManageProvincesDialog(false)}
+                        >
+                            {editing?.role === 'superAdmin' ? 'Đóng' : 'Hủy'}
+                        </Button>
+                        {editing?.role !== 'superAdmin' && (
+                            <Button 
+                                onClick={handleUpdateProvinces} 
+                                disabled={isSubmitting || loadingProvinces}
+                            >
+                                {isSubmitting ? "Đang lưu..." : "Lưu"}
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

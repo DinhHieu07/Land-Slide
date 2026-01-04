@@ -60,7 +60,7 @@ export function LocationPickerMap({ onLocationSelect, initialLat, initialLon }: 
     };
 
     return (
-        <div className="w-full h-[400px] rounded-lg border overflow-hidden relative">
+        <div className="w-full h-[300px] sm:h-[400px] rounded-lg border overflow-hidden relative">
             <MapContainer
                 // @ts-expect-error
                 center={center}

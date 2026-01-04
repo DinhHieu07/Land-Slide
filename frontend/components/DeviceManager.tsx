@@ -455,7 +455,7 @@ export default function DeviceManager() {
                             Thêm thiết bị
                         </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>{editing ? "Chỉnh sửa thiết bị" : "Thêm thiết bị"}</DialogTitle>
                             <DialogDescription>Nhập thông tin thiết bị.</DialogDescription>

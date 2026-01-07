@@ -1,6 +1,9 @@
-const { Resend } = require('resend');
+const sgMail = require('@sendgrid/mail');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Khởi tạo SendGrid
+if (process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
 const sendAlertEmail = async (recipients, alertData) => {
     try {
@@ -9,28 +12,33 @@ const sendAlertEmail = async (recipients, alertData) => {
             return { success: false, message: 'Không có người nhận email' };
         }
 
-        if (!process.env.RESEND_API_KEY) {
-            console.error('RESEND_API_KEY chưa được cấu hình');
-            return { success: false, message: 'RESEND_API_KEY chưa được cấu hình' };
+        if (!process.env.SENDGRID_API_KEY) {
+            console.error('SENDGRID_API_KEY chưa được cấu hình');
+            return { success: false, message: 'SENDGRID_API_KEY chưa được cấu hình' };
         }
 
         // Tạo email HTML
         const emailHtml = generateAlertEmailHtml(alertData);
 
-        const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+        const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'noreply@landslide-monitoring.com';
 
         // Gửi email đến tất cả người nhận
-        const result = await resend.emails.send({
-            from: fromEmail,
+        const msg = {
             to: recipients,
+            from: fromEmail,
             subject: `🚨 CẢNH BÁO: ${alertData.title}`,
             html: emailHtml,
-        });
+        };
+
+        const result = await sgMail.send(msg);
 
         console.log('Email đã được gửi thành công:', result);
         return { success: true, data: result };
     } catch (error) {
         console.error('Lỗi khi gửi email:', error);
+        if (error.response) {
+            console.error('SendGrid error details:', error.response.body);
+        }
         return { success: false, message: error.message, error };
     }
 };
@@ -154,7 +162,7 @@ const generateAlertEmailHtml = (alertData) => {
                                     <!-- Alert Details -->
                                     <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
                                         <h3 style="margin: 0 0 15px 0; color: #1f2937; font-size: 16px; font-weight: 600; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
-                                            📋 Chi tiết cảnh báo
+                                            Chi tiết cảnh báo
                                         </h3>
                                         
                                         <table role="presentation" style="width: 100%; border-collapse: collapse;">
@@ -178,7 +186,7 @@ const generateAlertEmailHtml = (alertData) => {
                                     <!-- Device Information -->
                                     <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
                                         <h3 style="margin: 0 0 15px 0; color: #1f2937; font-size: 16px; font-weight: 600; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
-                                            📍 Nguồn cảnh báo
+                                            Nguồn cảnh báo
                                         </h3>
                                         
                                         <table role="presentation" style="width: 100%; border-collapse: collapse;">

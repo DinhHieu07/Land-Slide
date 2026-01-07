@@ -73,11 +73,8 @@ export const authenticatedFetch = async (
         credentials: "include", // gửi cookie kèm request
     });
 
-    const cloned = response.clone();
-    const data = await cloned.json();
-
     // Nếu token hết hạn, thử refresh
-    if (response.status === 401 && data?.error === "Token đã hết hạn") {
+    if (response.status === 401) {
         const newAccessToken = await refreshAccessToken();
 
         if (newAccessToken) {
@@ -91,6 +88,7 @@ export const authenticatedFetch = async (
         } else {
             // Không thể refresh, redirect về trang đăng nhập
             if (typeof window !== "undefined") {
+                localStorage.removeItem("accessToken");
                 window.location.href = "/";
             }
         }

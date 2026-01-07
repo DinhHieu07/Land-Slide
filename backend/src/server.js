@@ -16,6 +16,8 @@ const dashboardRoute = require('./routes/dashboardRoute');
 const historyRoute = require('./routes/historyRoute');
 const provinceRoute = require('./routes/provinceRoute');
 const accountRoute = require('./routes/accountRoute');
+const { initMqttSubscriber } = require('./services/mqttSubscriber');
+const { startDeviceMonitor } = require('./services/deviceMonitor');
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +63,16 @@ const port = process.env.PORT || 5000;
 server.listen(port, () => {
     console.log(`Server is running on port ${port}`);
     console.log(`Socket.io is ready`);
+    
+    // Khởi động MQTT subscriber
+    initMqttSubscriber(io);
+    
+    // Khởi động Device Monitor (cronjob kiểm tra thiết bị offline)
+    const timeoutMinutes = parseInt(process.env.DEVICE_OFFLINE_TIMEOUT_MINUTES || '5');
+    const createAlert = process.env.DEVICE_OFFLINE_CREATE_ALERT;
+    const schedule = process.env.DEVICE_MONITOR_SCHEDULE || '*/5 * * * *';
+    
+    startDeviceMonitor(io, schedule, timeoutMinutes, createAlert);
 });
 
 module.exports = { io };

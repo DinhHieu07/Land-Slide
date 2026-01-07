@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSocket } from "@/contexts/SocketContext";
 import { authenticatedFetch } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import {
     Activity,
@@ -25,6 +28,7 @@ import {
     CheckCircle,
     Info,
     History,
+    User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -35,8 +39,18 @@ import {
     XAxis,
     YAxis,
     CartesianGrid,
+    LineChart,
+    Line,
 } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { Server } from "lucide-react";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -79,6 +93,33 @@ type SensorSeries = Record<
     }>
 >;
 
+type DeviceSensorData = {
+    sensor_code: string;
+    sensor_name: string;
+    sensor_type: string;
+    data: Array<{
+        time: string;
+        count: number;
+        avg_value: number | null;
+        min_value: number | null;
+        max_value: number | null;
+    }>;
+};
+
+type DeviceInfo = {
+    device_id: string;
+    name: string;
+    status: string;
+    last_seen: string;
+    province_id: number | null;
+    province_name: string | null;
+};
+
+type DeviceOption = {
+    device_id: string;
+    name: string;
+};
+
 type AlertStats = {
     active_count: number;
     acknowledged_count: number;
@@ -91,7 +132,8 @@ type AlertStats = {
 
 export default function DashboardView() {
     const router = useRouter();
-    const { isAuthenticated, isAdmin, loading } = useAuth();
+    const { isAuthenticated, isAdmin, isSuperAdmin, loading } = useAuth();
+    const { socket, isConnected } = useSocket();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
     const [sensorSeries, setSensorSeries] = useState<SensorSeries>({});
@@ -99,6 +141,15 @@ export default function DashboardView() {
     const [loadingSensor, setLoadingSensor] = useState(true);
     const [alertStats, setAlertStats] = useState<AlertStats | null>(null);
     const [loadingAlertStats, setLoadingAlertStats] = useState(true);
+    const [provincePage, setProvincePage] = useState(1);
+    const itemsPerPage = 3;
+    
+    // State cho section chi tiết theo thiết bị
+    const [devices, setDevices] = useState<DeviceOption[]>([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+    const [deviceSensorData, setDeviceSensorData] = useState<DeviceSensorData[]>([]);
+    const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+    const [loadingDeviceData, setLoadingDeviceData] = useState(false);
 
     // Lấy username từ localStorage (nếu có)
     const getUsername = () => {
@@ -116,8 +167,207 @@ export default function DashboardView() {
             fetchStats();
             fetchSensorStats();
             fetchAlertStats();
+            fetchDevices();
         }
-    }, [isAuthenticated, isAdmin]);
+    }, [isAuthenticated, isAdmin, username]);
+
+    useEffect(() => {
+        if (selectedDeviceId && isAuthenticated && isAdmin) {
+            fetchDeviceSensorData(selectedDeviceId);
+        } else {
+            setDeviceSensorData([]);
+            setDeviceInfo(null);
+        }
+    }, [selectedDeviceId, isAuthenticated, isAdmin, username]);
+
+    // Debounce timer ref để tránh quá nhiều requests
+    const sensorUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Real-time updates via socket
+    useEffect(() => {
+        if (!socket || !isConnected || !isAuthenticated) {
+            return;
+        }
+
+        const handleNewAlert = () => {
+            // Refresh alert stats khi có cảnh báo mới
+            fetchAlertStats();
+        };
+
+        const handleAlertUpdated = () => {
+            // Refresh alert stats khi cảnh báo được cập nhật
+            fetchAlertStats();
+        };
+
+        const handleSensorDataUpdate = (data: {
+            device_id: string;
+            sensor_id: number;
+            sensor_code: string;
+            sensor_name: string;
+            sensor_type: string;
+            value: number;
+            unit: string;
+            recorded_at: string;
+        }) => {
+            const recordedAt = new Date(data.recorded_at);
+            const timeBucket = new Date(recordedAt);
+            timeBucket.setMinutes(0, 0, 0); // Round to hour
+            
+            // Cập nhật trực tiếp vào state để biểu đồ tự động cập nhật ngay
+            if (!selectedDeviceId) {
+                // Cập nhật biểu đồ tổng quan
+                setSensorSeries((prev) => {
+                    const newSeries = { ...prev };
+                    const sensorType = data.sensor_type;
+                    
+                    if (!newSeries[sensorType]) {
+                        newSeries[sensorType] = [];
+                    }
+                    
+                    // Tìm xem đã có data point cho time bucket này chưa
+                    const existingIndex = newSeries[sensorType].findIndex(
+                        (item) => new Date(item.time).getTime() === timeBucket.getTime()
+                    );
+                    
+                    if (existingIndex >= 0) {
+                        // Cập nhật existing point
+                        const existing = newSeries[sensorType][existingIndex];
+                        newSeries[sensorType][existingIndex] = {
+                            ...existing,
+                            count: existing.count + 1,
+                            avg_value: existing.avg_value !== null 
+                                ? (existing.avg_value * existing.count + data.value) / (existing.count + 1)
+                                : data.value
+                        };
+                    } else {
+                        // Thêm data point mới
+                        newSeries[sensorType].push({
+                            time: timeBucket.toISOString(),
+                            count: 1,
+                            avg_value: data.value
+                        });
+                    }
+                    
+                    // Giữ tối đa 24 giờ gần nhất
+                    newSeries[sensorType] = newSeries[sensorType]
+                        .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+                        .slice(-24);
+                    
+                    return newSeries;
+                });
+            } else if (data.device_id === selectedDeviceId) {
+                // Cập nhật biểu đồ chi tiết theo thiết bị
+                setDeviceSensorData((prev) => {
+                    const newData = [...prev];
+                    const sensorKey = `${data.sensor_code}_${data.sensor_type}`;
+                    
+                    let sensorIndex = newData.findIndex(
+                        (s) => s.sensor_code === data.sensor_code && s.sensor_type === data.sensor_type
+                    );
+                    
+                    if (sensorIndex < 0) {
+                        // Thêm sensor mới
+                        newData.push({
+                            sensor_code: data.sensor_code,
+                            sensor_name: data.sensor_name,
+                            sensor_type: data.sensor_type,
+                            data: []
+                        });
+                        sensorIndex = newData.length - 1;
+                    }
+                    
+                    const sensor = newData[sensorIndex];
+                    const existingIndex = sensor.data.findIndex(
+                        (item) => new Date(item.time).getTime() === timeBucket.getTime()
+                    );
+                    
+                    if (existingIndex >= 0) {
+                        // Cập nhật existing point
+                        const existing = sensor.data[existingIndex];
+                        const newCount = existing.count + 1;
+                        sensor.data[existingIndex] = {
+                            ...existing,
+                            count: newCount,
+                            avg_value: existing.avg_value !== null
+                                ? (existing.avg_value * existing.count + data.value) / newCount
+                                : data.value,
+                            min_value: existing.min_value !== null 
+                                ? Math.min(existing.min_value, data.value)
+                                : data.value,
+                            max_value: existing.max_value !== null
+                                ? Math.max(existing.max_value, data.value)
+                                : data.value
+                        };
+                    } else {
+                        // Thêm data point mới
+                        sensor.data.push({
+                            time: timeBucket.toISOString(),
+                            count: 1,
+                            avg_value: data.value,
+                            min_value: data.value,
+                            max_value: data.value
+                        });
+                    }
+                    
+                    // Giữ tối đa 24 giờ gần nhất
+                    sensor.data = sensor.data
+                        .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+                        .slice(-24);
+                    
+                    return newData;
+                });
+            }
+            
+            // Debounce: sync với server sau 5 giây để đảm bảo dữ liệu chính xác
+            if (sensorUpdateTimeoutRef.current) {
+                clearTimeout(sensorUpdateTimeoutRef.current);
+            }
+            
+            sensorUpdateTimeoutRef.current = setTimeout(() => {
+                if (!selectedDeviceId) {
+                    fetchSensorStats();
+                } else if (data.device_id === selectedDeviceId) {
+                    fetchDeviceSensorData(selectedDeviceId);
+                }
+            }, 5000);
+        };
+
+        const handleDeviceStatusUpdate = (data: {
+            device_id: string;
+            status: string;
+            last_seen: string;
+            updated_at: string;
+        }) => {
+            // Refresh stats khi có device chuyển trạng thái
+            fetchStats();
+        };
+
+        socket.on("new_alert", handleNewAlert);
+        socket.on("alert_updated", handleAlertUpdated);
+        socket.on("sensor_data_update", handleSensorDataUpdate);
+        socket.on("device_status_updated", handleDeviceStatusUpdate);
+
+        return () => {
+            socket.off("new_alert", handleNewAlert);
+            socket.off("alert_updated", handleAlertUpdated);
+            socket.off("sensor_data_update", handleSensorDataUpdate);
+            socket.off("device_status_updated", handleDeviceStatusUpdate);
+            // Clear timeout khi cleanup
+            if (sensorUpdateTimeoutRef.current) {
+                clearTimeout(sensorUpdateTimeoutRef.current);
+            }
+        };
+    }, [socket, isConnected, isAuthenticated, selectedDeviceId]);
+
+    // Reset trang về 1 khi dữ liệu tỉnh thành thay đổi
+    useEffect(() => {
+        if (stats?.devices?.byProvince) {
+            const totalPages = Math.max(1, Math.ceil(stats.devices.byProvince.length / itemsPerPage));
+            if (provincePage > totalPages) {
+                setProvincePage(1);
+            }
+        }
+    }, [stats?.devices?.byProvince]);
 
     const sensorTypes = useMemo(() => Object.keys(sensorSeries || {}), [sensorSeries]);
 
@@ -132,7 +382,9 @@ export default function DashboardView() {
     const fetchStats = async () => {
         try {
             setLoadingStats(true);
-            const res = await authenticatedFetch(`${API_URL}/api/dashboard/stats`, {
+            const params = new URLSearchParams();
+            if (username) params.append("username", username);
+            const res = await authenticatedFetch(`${API_URL}/api/dashboard/stats?${params.toString()}`, {
                 method: "GET",
             });
             const data = await res.json();
@@ -149,7 +401,11 @@ export default function DashboardView() {
     const fetchSensorStats = async () => {
         try {
             setLoadingSensor(true);
-            const res = await authenticatedFetch(`${API_URL}/api/dashboard/sensor-stats?hours=24&interval=hour`, {
+            const params = new URLSearchParams();
+            params.append("hours", "24");
+            params.append("interval", "hour");
+            if (username) params.append("username", username);
+            const res = await authenticatedFetch(`${API_URL}/api/dashboard/sensor-stats?${params.toString()}`, {
                 method: "GET",
             });
             const data = await res.json();
@@ -180,6 +436,53 @@ export default function DashboardView() {
             console.error("Lỗi khi lấy thống kê cảnh báo:", error);
         } finally {
             setLoadingAlertStats(false);
+        }
+    };
+
+    const fetchDevices = async () => {
+        try {
+            const params = new URLSearchParams();
+            if (username) params.append("username", username);
+            params.append("limit", "1000");
+            params.append("offset", "0");
+            const res = await authenticatedFetch(`${API_URL}/api/devices?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                const deviceOptions = (data.data || []).map((d: { device_id: string; name: string }) => ({
+                    device_id: d.device_id,
+                    name: d.name || d.device_id,
+                }));
+                setDevices(deviceOptions);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách thiết bị:", error);
+        }
+    };
+
+    const fetchDeviceSensorData = async (deviceId: string) => {
+        try {
+            setLoadingDeviceData(true);
+            const params = new URLSearchParams();
+            params.append("device_id", deviceId);
+            params.append("hours", "24");
+            params.append("interval", "hour");
+            if (username) params.append("username", username);
+            const res = await authenticatedFetch(`${API_URL}/api/dashboard/sensor-stats-by-device?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setDeviceSensorData(data.sensors || []);
+                setDeviceInfo(data.device || null);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy dữ liệu cảm biến thiết bị:", error);
+            setDeviceSensorData([]);
+            setDeviceInfo(null);
+        } finally {
+            setLoadingDeviceData(false);
         }
     };
 
@@ -229,13 +532,15 @@ export default function DashboardView() {
                     </p>
                 </div>
             </div>
-            <div className="flex gap-2 justify-end">
+            {/* <div className="flex gap-2 justify-end">
                 <Button onClick={() => { fetchStats(); fetchSensorStats(); fetchAlertStats(); }} variant="outline">
                     <RefreshCw className="size-4 mr-2" />
                     Làm mới
                 </Button>
+            </div> */}
+            <div className="text-gray-800 flex items-center gap-2">
+                <Server size={20} /> Giám sát thiết bị
             </div>
-
             {/* Stats Cards */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 {/* Tổng thiết bị */}
@@ -252,22 +557,51 @@ export default function DashboardView() {
                     </CardContent>
                 </Card>
 
-                {/* Tổng sự kiện */}
+                {/* Thiết bị đang hoạt động */}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Tổng sự kiện</CardTitle>
-                        <Activity className="h-4 w-4 text-muted-foreground" />
+                        <CardTitle className="text-sm font-medium">Thiết bị đang hoạt động</CardTitle>
+                        <CheckCircle className="h-4 w-4 text-green-600" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{stats.events.total}</div>
+                        <div className="text-2xl font-bold text-green-600">{stats.devices.online}</div>
                         <p className="text-xs text-muted-foreground">
-                            {stats.events.recent} sự kiện trong 24h
+                            {stats.devices.total > 0
+                                ? `${Math.round((stats.devices.online / stats.devices.total) * 100)}% tổng thiết bị`
+                                : "Chưa có thiết bị"}
                         </p>
                     </CardContent>
                 </Card>
 
-                {/* Tổng cảnh báo */}
+                {/* Thiết bị mất kết nối */}
                 <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Thiết bị mất kết nối</CardTitle>
+                        <XCircle className="h-4 w-4 text-red-600" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-red-600">{stats.devices.disconnected}</div>
+                        <p className="text-xs text-muted-foreground">
+                            {stats.devices.disconnected > 0
+                                ? "Cần kiểm tra và xử lý"
+                                : "Tất cả thiết bị đã kết nối"}
+                        </p>
+                    </CardContent>
+                </Card>
+
+                {/* Thiết bị bảo trì */}
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Thiết bị bảo trì</CardTitle>
+                        <Settings className="h-4 w-4 text-blue-600" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-blue-600">{stats.devices.maintenance}</div>
+                    </CardContent>
+                </Card>
+
+                {/* Tổng cảnh báo */}
+                {/* <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Cảnh báo</CardTitle>
                         <AlertTriangle className="h-4 w-4 text-muted-foreground" />
@@ -280,22 +614,12 @@ export default function DashboardView() {
                             {alertStats?.active_count ? `${alertStats.active_count} đang bị lỗi` : "Tổng số cảnh báo hệ thống"}
                         </p>
                     </CardContent>
-                </Card>
-
-                {/* Tổng khu vực */}
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Khu vực</CardTitle>
-                        <MapPin className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.areas.total}</div>
-                        <p className="text-xs text-muted-foreground">
-                            Khu vực được giám sát
-                        </p>
-                    </CardContent>
-                </Card>
+                </Card> */}
             </div>
+
+            <h2 className="text-gray-800 mb-4 flex items-center gap-2">
+                <AlertCircle size={20} /> Tình trạng cảnh báo
+            </h2>
 
             {/* Thống kê cảnh báo chi tiết */}
             {alertStats && (
@@ -473,22 +797,81 @@ export default function DashboardView() {
                         <CardDescription>Phân bổ thiết bị theo khu vực địa lý</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-3">
-                            {stats.devices.byProvince.map((item) => (
-                                <div key={item.province_code} className="space-y-2">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-sm">{item.province_name || "Không rõ"}</span>
-                                        <span className="font-semibold">{item.count}</span>
+                        {(() => {
+                            const provinces = stats.devices.byProvince || [];
+                            const totalPages = Math.max(1, Math.ceil(provinces.length / itemsPerPage));
+                            const startIndex = (provincePage - 1) * itemsPerPage;
+                            const endIndex = startIndex + itemsPerPage;
+                            const currentProvinces = provinces.slice(startIndex, endIndex);
+
+                            return (
+                                <>
+                                    <div className="space-y-3">
+                                        {currentProvinces.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground text-center py-4">
+                                                Không có dữ liệu
+                                            </p>
+                                        ) : (
+                                            currentProvinces.map((item) => (
+                                                <div key={item.province_code} className="space-y-2">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-sm">{item.province_name || "Không rõ"}</span>
+                                                        <span className="font-semibold">{item.count}</span>
+                                                    </div>
+                                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                                        <div
+                                                            className="bg-blue-600 h-2 rounded-full transition-all"
+                                                            style={{ width: `${stats.devices.total > 0 ? (item.count / stats.devices.total) * 100 : 0}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
                                     </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="bg-blue-600 h-2 rounded-full transition-all"
-                                            style={{ width: `${stats.devices.total > 0 ? (item.count / stats.devices.total) * 100 : 0}%` }}
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                                    {provinces.length > itemsPerPage && (
+                                        <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                                            <p className="text-sm text-muted-foreground">
+                                                Trang {provincePage} / {totalPages} ({provinces.length} tỉnh thành)
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setProvincePage(1)}
+                                                    disabled={provincePage === 1}
+                                                >
+                                                    Đầu
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setProvincePage((p) => Math.max(1, p - 1))}
+                                                    disabled={provincePage === 1}
+                                                >
+                                                    Trước
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setProvincePage((p) => Math.min(totalPages, p + 1))}
+                                                    disabled={provincePage === totalPages}
+                                                >
+                                                    Tiếp
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setProvincePage(totalPages)}
+                                                    disabled={provincePage === totalPages}
+                                                >
+                                                    Cuối
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
                     </CardContent>
                 </Card>
             </div>
@@ -570,14 +953,14 @@ export default function DashboardView() {
                                                 {type === "vibration_g"
                                                     ? "Cảm biến rung (g)"
                                                     : type === "rainfall_24h"
-                                                    ? "Lượng mưa 24h (mm)"
-                                                    : type === "soil_moisture"
-                                                    ? "Độ ẩm đất (%)"
-                                                    : type === "tilt_deg"
-                                                    ? "Độ nghiêng (°)"
-                                                    : type === "slope_deg"
-                                                    ? "Độ dốc (°)"
-                                                    : type}
+                                                        ? "Lượng mưa 24h (mm)"
+                                                        : type === "soil_moisture"
+                                                            ? "Độ ẩm đất (%)"
+                                                            : type === "tilt_deg"
+                                                                ? "Độ nghiêng (°)"
+                                                                : type === "slope_deg"
+                                                                    ? "Độ dốc (°)"
+                                                                    : type}
                                             </span>
                                         </div>
                                         {series.length === 0 ? (
@@ -719,14 +1102,14 @@ export default function DashboardView() {
                                                 {type === "vibration"
                                                     ? "Cảm biến rung"
                                                     : type === "rainfall"
-                                                    ? "Lượng mưa"
-                                                    : type === "humidity"
-                                                    ? "Độ ẩm"
-                                                    : type === "position"
-                                                    ? "Vị trí"
-                                                    : type === "slope"
-                                                    ? "Độ dốc"
-                                                    : type}
+                                                        ? "Lượng mưa"
+                                                        : type === "humidity"
+                                                            ? "Độ ẩm"
+                                                            : type === "position"
+                                                                ? "Vị trí"
+                                                                : type === "slope"
+                                                                    ? "Độ dốc"
+                                                                    : type}
                                             </span>
                                             <span className="text-xs text-muted-foreground">({unit})</span>
                                         </div>
@@ -826,8 +1209,217 @@ export default function DashboardView() {
                 </CardContent>
             </Card>
 
-            {/* Mức độ nguy hiểm sự kiện */}
+            {/* Chi tiết dữ liệu theo thiết bị */}
             <Card>
+                <CardHeader>
+                    <CardTitle>Chi tiết dữ liệu theo thiết bị</CardTitle>
+                    <CardDescription>Xem dữ liệu cảm biến của từng thiết bị cụ thể</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    <div className="flex items-center gap-4">
+                        <Label htmlFor="device-select" className="text-sm font-medium min-w-[120px]">
+                            Chọn thiết bị:
+                        </Label>
+                        <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId}>
+                            <SelectTrigger id="device-select" className="w-full max-w-md">
+                                <SelectValue placeholder="Chọn thiết bị để xem chi tiết" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {devices.length === 0 ? (
+                                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                        Không có thiết bị
+                                    </div>
+                                ) : (
+                                    devices.map((device) => (
+                                        <SelectItem key={device.device_id} value={device.device_id}>
+                                            {device.name} ({device.device_id})
+                                        </SelectItem>
+                                    ))
+                                )}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {selectedDeviceId && deviceInfo && (
+                        <div className="rounded-lg border bg-slate-50 p-4">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-lg font-semibold">{deviceInfo.name}</h3>
+                                    <p className="text-sm text-muted-foreground">ID: {deviceInfo.device_id}</p>
+                                    {deviceInfo.province_name && (
+                                        <p className="text-sm text-muted-foreground">Tỉnh thành: {deviceInfo.province_name}</p>
+                                    )}
+                                </div>
+                                <div className="text-right">
+                                    <Badge
+                                        className={
+                                            deviceInfo.status === "online"
+                                                ? "bg-green-100 text-green-800"
+                                                : deviceInfo.status === "offline"
+                                                    ? "bg-gray-100 text-gray-700"
+                                                    : deviceInfo.status === "disconnected"
+                                                        ? "bg-red-100 text-red-800"
+                                                        : "bg-blue-100 text-blue-800"
+                                        }
+                                    >
+                                        {deviceInfo.status === "online"
+                                            ? "Đang hoạt động"
+                                            : deviceInfo.status === "offline"
+                                                ? "Offline"
+                                                : deviceInfo.status === "disconnected"
+                                                    ? "Mất kết nối"
+                                                    : "Bảo trì"}
+                                    </Badge>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Cập nhật: {new Date(deviceInfo.last_seen).toLocaleString("vi-VN")}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {loadingDeviceData && (
+                        <div className="text-center py-8">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                            <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+                        </div>
+                    )}
+
+                    {!loadingDeviceData && selectedDeviceId && deviceSensorData.length === 0 && (
+                        <div className="text-center py-8 border rounded-lg">
+                            <p className="text-sm text-muted-foreground">Chưa có dữ liệu cảm biến trong 24h qua</p>
+                        </div>
+                    )}
+
+                    {!loadingDeviceData && deviceSensorData.length > 0 && (
+                        <div className="grid gap-6 lg:grid-cols-2">
+                            {deviceSensorData.map((sensor) => {
+                                const sortedData = [...sensor.data].sort(
+                                    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+                                );
+
+                                // Format dữ liệu cho chart
+                                const chartData = sortedData.slice(-24).map((d) => {
+                                    const date = new Date(d.time);
+                                    const timeLabel = `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`;
+                                    return {
+                                        time: timeLabel,
+                                        "Giá trị TB": d.avg_value || 0,
+                                        "Min": d.min_value || 0,
+                                        "Max": d.max_value || 0,
+                                    };
+                                });
+
+                                const unitMap: Record<string, string> = {
+                                    rainfall_24h: "mm",
+                                    soil_moisture: "%",
+                                    vibration_g: "g",
+                                    tilt_deg: "°",
+                                    slope_deg: "°",
+                                };
+                                const unit = unitMap[sensor.sensor_type] || "";
+
+                                const colorMap: Record<string, string> = {
+                                    rainfall_24h: "hsl(221.2 83.2% 53.3%)",
+                                    soil_moisture: "hsl(142.1 76.2% 36.3%)",
+                                    vibration_g: "hsl(0 84.2% 60.2%)",
+                                    tilt_deg: "hsl(262.1 83.3% 57.8%)",
+                                    slope_deg: "hsl(43.3 96.4% 56.3%)",
+                                };
+                                const lineColor = colorMap[sensor.sensor_type] || "hsl(221.2 83.2% 53.3%)";
+
+                                const chartConfig = {
+                                    "Giá trị TB": {
+                                        label: "Giá trị TB",
+                                        color: lineColor,
+                                    },
+                                    "Min": {
+                                        label: "Min",
+                                        color: "hsl(0 0% 70%)",
+                                    },
+                                    "Max": {
+                                        label: "Max",
+                                        color: "hsl(0 0% 70%)",
+                                    },
+                                };
+
+                                return (
+                                    <div key={`${sensor.sensor_code}_${sensor.sensor_type}`} className="space-y-3">
+                                        <div className="flex items-center gap-2">
+                                            {sensor.sensor_type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
+                                            {sensor.sensor_type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
+                                            {sensor.sensor_type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
+                                            {sensor.sensor_type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
+                                            {sensor.sensor_type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
+                                            <div>
+                                                <span className="text-base font-semibold text-slate-900">{sensor.sensor_name}</span>
+                                                <span className="text-xs text-muted-foreground ml-2">({sensor.sensor_code})</span>
+                                            </div>
+                                        </div>
+                                        {chartData.length === 0 ? (
+                                            <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
+                                                Chưa có dữ liệu trong khoảng thời gian này
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <ChartContainer config={chartConfig} className="h-64">
+                                                    <LineChart data={chartData}>
+                                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                                                        <XAxis
+                                                            dataKey="time"
+                                                            tickLine={false}
+                                                            axisLine={false}
+                                                            tickMargin={8}
+                                                            className="text-xs"
+                                                        />
+                                                        <YAxis
+                                                            tickLine={false}
+                                                            axisLine={false}
+                                                            tickMargin={8}
+                                                            className="text-xs"
+                                                            label={{ value: `Giá trị (${unit})`, angle: -90, position: "insideLeft" }}
+                                                        />
+                                                        <ChartTooltip
+                                                            content={<ChartTooltipContent formatter={(value) => `${Number(value).toFixed(2)} ${unit}`} />}
+                                                        />
+                                                        <Line
+                                                            type="monotone"
+                                                            dataKey="Giá trị TB"
+                                                            stroke={lineColor}
+                                                            strokeWidth={2}
+                                                            dot={false}
+                                                        />
+                                                    </LineChart>
+                                                </ChartContainer>
+                                                <div className="flex items-center justify-between text-xs text-slate-600 px-2">
+                                                    <span>
+                                                        TB: <span className="font-semibold text-slate-900">
+                                                            {(chartData.reduce((sum, d) => sum + (d["Giá trị TB"] || 0), 0) / chartData.length).toFixed(2)} {unit}
+                                                        </span>
+                                                    </span>
+                                                    <span>
+                                                        Min: <span className="font-semibold text-slate-900">
+                                                            {Math.min(...chartData.map(d => d["Min"] || 0)).toFixed(2)} {unit}
+                                                        </span>
+                                                    </span>
+                                                    <span>
+                                                        Max: <span className="font-semibold text-slate-900">
+                                                            {Math.max(...chartData.map(d => d["Max"] || 0)).toFixed(2)} {unit}
+                                                        </span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Mức độ nguy hiểm sự kiện */}
+            {/* <Card>
                 <CardHeader>
                     <CardTitle>Mức độ nguy hiểm sự kiện</CardTitle>
                     <CardDescription>Phân bổ theo mức độ nghiêm trọng</CardDescription>
@@ -866,7 +1458,7 @@ export default function DashboardView() {
                         })}
                     </div>
                 </CardContent>
-            </Card>
+            </Card> */}
 
             {/* Sự kiện 7 ngày gần nhất */}
             {stats.events.last7Days.length > 0 && (
@@ -914,10 +1506,12 @@ export default function DashboardView() {
                             <Radio className="h-5 w-5 mb-2" />
                             <span>Quản lý thiết bị</span>
                         </Button>
-                        <Button variant="outline" onClick={() => router.push('/admin')} className="h-auto flex-col py-4">
-                            <Activity className="h-5 w-5 mb-2" />
-                            <span>Quản lý sự kiện</span>
-                        </Button>
+                        {isSuperAdmin && (
+                        <Button variant="outline" onClick={() => router.push('/account')} className="h-auto flex-col py-4">
+                                <User className="h-5 w-5 mb-2" />
+                                <span>Quản lý tài khoản</span>
+                            </Button>
+                        )}
                         <Button variant="outline" onClick={() => router.push('/map')} className="h-auto flex-col py-4">
                             <MapPin className="h-5 w-5 mb-2" />
                             <span>Xem bản đồ</span>
@@ -928,7 +1522,7 @@ export default function DashboardView() {
                         </Button>
                         <Button variant="outline" onClick={() => router.push('/history')} className="h-auto flex-col py-4">
                             <History className="h-5 w-5 mb-2" />
-                            <span>Lịch sử cảnh báo</span>
+                            <span>Lịch sử hệ thống</span>
                         </Button>
                     </div>
                 </CardContent>

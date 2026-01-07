@@ -41,6 +41,7 @@ import { Toast, ToastSeverity } from "@/components/Toast";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import formatEvidenceItem from "@/components/EvidenceTrans";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -233,9 +234,6 @@ export default function AlertManagement() {
 
         // Tạo handlers mới
         const handleNewAlert = (alert: Alert) => {
-            setToastMessage(`Cảnh báo mới: ${alert.title}`);
-            setToastSeverity("warning");
-            setToastOpen(true);
             fetchAlerts();
             fetchStats();
         };
@@ -250,7 +248,6 @@ export default function AlertManagement() {
         // Lưu handlers vào ref để cleanup
         handlersRef.current = { handleNewAlert, handleAlertUpdated };
 
-        // Xóa listeners cũ trước khi đăng ký mới (tránh duplicate)
         socket.off("new_alert");
         socket.off("alert_updated");
 
@@ -258,7 +255,6 @@ export default function AlertManagement() {
         socket.on("new_alert", handleNewAlert);
         socket.on("alert_updated", handleAlertUpdated);
 
-        // Cleanup listeners khi component unmount hoặc socket thay đổi
         return () => {
             if (socket) {
                 socket.off("new_alert", handleNewAlert);
@@ -742,9 +738,15 @@ export default function AlertManagement() {
                             {detailAlert.evidence_data && (
                                 <div>
                                     <Label>Dữ liệu bằng chứng</Label>
-                                    <pre className="mt-1 text-xs bg-gray-50 p-3 rounded border overflow-auto max-h-40">
-                                        {JSON.stringify(detailAlert.evidence_data, null, 2)}
-                                    </pre>
+                                    <div className="mt-1 text-xs bg-gray-50 p-3 rounded border overflow-auto max-h-40 space-y-2">
+                                        {Object.entries(detailAlert.evidence_data).map(([key, value]) => (
+                                            <div key={key}>
+                                                <Label className="text-sm font-medium">{formatEvidenceItem(key, value).label}:  
+                                                    <span className="font-normal ml-1">{formatEvidenceItem(key, value).value}</span>
+                                                </Label>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                             <div className="grid grid-cols-2 gap-4 text-sm text-gray-500">

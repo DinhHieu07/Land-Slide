@@ -5,6 +5,8 @@ import AppSidebar from "@/components/Sidebar";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ResponsiveTrigger } from "@/components/ResponsiveTriggerSidebar";
 import { SocketProvider } from "@/contexts/SocketContext";
+import { AlertNotificationProvider } from "@/contexts/AlertNotificationContext";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "Landslide Management System",
@@ -21,13 +23,23 @@ export default function RootLayout({
       <body suppressHydrationWarning={true}>
         <AuthProvider>
           <SocketProvider>
-            <SidebarProvider>
-              <AppSidebar />
-              <main className="relative min-h-screen w-full h-full">
-                <ResponsiveTrigger />
-                {children}
-              </main>
-            </SidebarProvider>
+            <AlertNotificationProvider>
+              <SidebarProvider>
+                <AppSidebar />
+                <main className="relative min-h-screen w-full h-full">
+                  <ResponsiveTrigger />
+                  {children}
+                </main>
+              </SidebarProvider>
+              <Toaster
+                position="top-right"
+                richColors
+                closeButton
+                toastOptions={{
+                  className: "shadow-lg",
+                }}
+              />
+            </AlertNotificationProvider>
           </SocketProvider>
         </AuthProvider>
       </body>

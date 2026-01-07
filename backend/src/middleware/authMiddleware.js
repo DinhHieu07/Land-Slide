@@ -22,7 +22,7 @@ const authenticateToken = async (req, res, next) => {
                 code: 'TOKEN_EXPIRED'
             });
         }
-        return res.status(403).json({ error: 'Token không hợp lệ' });
+        return res.status(401).json({ error: 'Token không hợp lệ', code: 'INVALID_TOKEN' });
     }
 };
 

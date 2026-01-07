@@ -25,6 +25,7 @@ import {
 import { Map, Trash, Pencil, Filter, MoreHorizontal, Info, MapPin } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
+import { useSocket } from "@/contexts/SocketContext";
 import { Device } from "@/types/device";
 import { Toast, ToastSeverity } from "@/components/Toast";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,7 @@ const statusColor: Record<Device["status"], string> = {
 export default function DeviceManager() {
     const router = useRouter();
     const { isAuthenticated, isAdmin, loading, isSuperAdmin } = useAuth();
+    const { socket, isConnected } = useSocket();
     const [devices, setDevices] = useState<Device[]>([]);
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -96,6 +98,9 @@ export default function DeviceManager() {
     const [sensors, setSensors] = useState<Sensor[]>([]);
     const [loadingSensors, setLoadingSensors] = useState(false);
     const [sensorsError, setSensorsError] = useState<string | null>(null);
+    const [editingSensor, setEditingSensor] = useState<Sensor | null>(null);
+    const [thresholdForm, setThresholdForm] = useState({ min_threshold: "", max_threshold: "" });
+    const [isUpdatingThreshold, setIsUpdatingThreshold] = useState(false);
     const [page, setPage] = useState(1);
     const pageSize = 10;
     const [totalDevices, setTotalDevices] = useState(0);
@@ -148,6 +153,67 @@ export default function DeviceManager() {
         } finally {
             setLoadingDevices(false);
         }
+    };
+
+    const handleUpdateThreshold = async () => {
+        if (!editingSensor) return;
+
+        // Validation
+        const minVal = thresholdForm.min_threshold === "" ? null : parseFloat(thresholdForm.min_threshold);
+        const maxVal = thresholdForm.max_threshold === "" ? null : parseFloat(thresholdForm.max_threshold);
+
+        if (minVal !== null && maxVal !== null && minVal >= maxVal) {
+            setToastMessage("Ngưỡng tối thiểu phải nhỏ hơn ngưỡng tối đa");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        setIsUpdatingThreshold(true);
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/sensors/${editingSensor.id}/threshold`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    min_threshold: minVal,
+                    max_threshold: maxVal,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                // Cập nhật sensor trong danh sách
+                setSensors((prev) =>
+                    prev.map((s) =>
+                        s.id === editingSensor.id
+                            ? { ...s, min_threshold: minVal, max_threshold: maxVal }
+                            : s
+                    )
+                );
+                setEditingSensor(null);
+                setThresholdForm({ min_threshold: "", max_threshold: "" });
+                setToastMessage("Đã cập nhật ngưỡng cảm biến thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+            } else {
+                setToastMessage(data.message || "Có lỗi xảy ra");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (error) {
+            console.error("Lỗi khi cập nhật ngưỡng:", error);
+            setToastMessage("Có lỗi xảy ra khi cập nhật ngưỡng");
+            setToastSeverity("error");
+            setToastOpen(true);
+        } finally {
+            setIsUpdatingThreshold(false);
+        }
+    };
+
+    const handleEditThreshold = (sensor: Sensor) => {
+        setEditingSensor(sensor);
+        setThresholdForm({
+            min_threshold: sensor.min_threshold !== null ? sensor.min_threshold.toString() : "",
+            max_threshold: sensor.max_threshold !== null ? sensor.max_threshold.toString() : "",
+        });
     };
 
     const fetchSensors = async (deviceId: string) => {
@@ -205,6 +271,29 @@ export default function DeviceManager() {
             fetchDevices();
         }
     }, [isAuthenticated, isAdmin, debouncedSearch, page, status, province]);
+
+    // Socket listener cho device status updates
+    useEffect(() => {
+        if (!socket || !isConnected || !isAuthenticated) {
+            return;
+        }
+
+        const handleDeviceStatusUpdate = (data: {
+            device_id: string;
+            status: string;
+            last_seen: string;
+            updated_at: string;
+        }) => {
+            // Refresh danh sách devices khi có device chuyển trạng thái
+            fetchDevices();
+        };
+
+        socket.on("device_status_updated", handleDeviceStatusUpdate);
+
+        return () => {
+            socket.off("device_status_updated", handleDeviceStatusUpdate);
+        };
+    }, [socket, isConnected, isAuthenticated]);
 
     const handleSubmit = async () => {
         setIsSubmitting(true);
@@ -844,12 +933,14 @@ export default function DeviceManager() {
                                             <th className="px-4 py-3 text-left">Loại</th>
                                             <th className="px-4 py-3 text-left">Model</th>
                                             <th className="px-4 py-3 text-left">Đơn vị</th>
+                                            <th className="px-4 py-3 text-left">Ngưỡng</th>
+                                            <th className="px-4 py-3 text-left">Thao tác</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {loadingSensors && (
                                             <tr>
-                                                <td colSpan={6} className="px-4 py-6 text-center">
+                                                <td colSpan={7} className="px-4 py-6 text-center">
                                                     <div className="flex flex-col items-center justify-center">
                                                         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-3"></div>
                                                         <p className="text-gray-600">Đang tải cảm biến...</p>
@@ -859,14 +950,14 @@ export default function DeviceManager() {
                                         )}
                                         {!loadingSensors && sensorsError && (
                                             <tr>
-                                                <td colSpan={6} className="px-4 py-4 text-center text-red-600">
+                                                <td colSpan={7} className="px-4 py-4 text-center text-red-600">
                                                     {sensorsError}
                                                 </td>
                                             </tr>
                                         )}
                                         {!loadingSensors && !sensorsError && sensors.length === 0 && (
                                             <tr>
-                                                <td colSpan={6} className="px-4 py-4 text-center text-gray-600">
+                                                <td colSpan={7} className="px-4 py-4 text-center text-gray-600">
                                                     Không có cảm biến nào
                                                 </td>
                                             </tr>
@@ -878,6 +969,29 @@ export default function DeviceManager() {
                                                 <td className="px-4 py-3 text-gray-700">{s.type}</td>
                                                 <td className="px-4 py-3 text-gray-700">{s.model || "—"}</td>
                                                 <td className="px-4 py-3 text-gray-700">{s.unit || "—"}</td>
+                                                <td className="px-4 py-3 text-gray-700">
+                                                    <div className="text-xs">
+                                                        {s.min_threshold !== null && s.max_threshold !== null ? (
+                                                            <span>{s.min_threshold} - {s.max_threshold} {s.unit || ""}</span>
+                                                        ) : s.min_threshold !== null ? (
+                                                            <span>Min: {s.min_threshold} {s.unit || ""}</span>
+                                                        ) : s.max_threshold !== null ? (
+                                                            <span>Max: {s.max_threshold} {s.unit || ""}</span>
+                                                        ) : (
+                                                            <span className="text-gray-400">Chưa đặt</span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => handleEditThreshold(s)}
+                                                    >
+                                                        <Pencil className="size-3 mr-1" />
+                                                        Sửa
+                                                    </Button>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -885,6 +999,58 @@ export default function DeviceManager() {
                             </div>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog chỉnh sửa ngưỡng cảm biến */}
+            <Dialog open={editingSensor !== null} onOpenChange={(open) => !open && setEditingSensor(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Chỉnh sửa ngưỡng cảm biến</DialogTitle>
+                        <DialogDescription>
+                            {editingSensor && `${editingSensor.name || editingSensor.code} (${editingSensor.type})`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="min_threshold">
+                                Ngưỡng tối thiểu {editingSensor?.unit && `(${editingSensor.unit})`}
+                            </Label>
+                            <Input
+                                id="min_threshold"
+                                type="number"
+                                step="any"
+                                placeholder="Để trống nếu không cần"
+                                value={thresholdForm.min_threshold}
+                                onChange={(e) => setThresholdForm({ ...thresholdForm, min_threshold: e.target.value })}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="max_threshold">
+                                Ngưỡng tối đa {editingSensor?.unit && `(${editingSensor.unit})`}
+                            </Label>
+                            <Input
+                                id="max_threshold"
+                                type="number"
+                                step="any"
+                                placeholder="Để trống nếu không cần"
+                                value={thresholdForm.max_threshold}
+                                onChange={(e) => setThresholdForm({ ...thresholdForm, max_threshold: e.target.value })}
+                            />
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                            <p>• Ngưỡng tối thiểu phải nhỏ hơn ngưỡng tối đa</p>
+                            <p>• Hệ thống sẽ tạo cảnh báo khi giá trị vượt quá ngưỡng</p>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingSensor(null)} disabled={isUpdatingThreshold}>
+                            Hủy
+                        </Button>
+                        <Button onClick={handleUpdateThreshold} disabled={isUpdatingThreshold}>
+                            {isUpdatingThreshold ? "Đang lưu..." : "Lưu"}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

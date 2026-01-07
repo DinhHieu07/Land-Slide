@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useContext, createContext } from "react";
-import { logout as logoutUtil } from "@/lib/auth";
+import { logout as logoutUtil, getAccessToken } from "@/lib/auth";
+import { initAuth } from "@/lib/auth-init";
 
 export interface User {
     id: number;
@@ -27,20 +28,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Kiểm tra localStorage khi component mount
-        const storedUser = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+        const initializeAuth = async () => {
+            console.log('🔍 Initializing auth...');
 
-        if (storedUser) {
-            try {
-                setUser(JSON.parse(storedUser));
-            } catch (error) {
-                console.error("Error parsing user data:", error);
+            // Kiểm tra và refresh token
+            const hasValidToken = await initAuth();
+            console.log('✅ Has valid token:', hasValidToken);
+
+            // Kiểm tra localStorage để lấy thông tin user
+            const storedUser = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+            const accessToken = getAccessToken();
+
+            if (storedUser && accessToken) {
+                try {
+                    const userData = JSON.parse(storedUser);
+                    console.log('👤 User data found:', userData);
+                    setUser(userData);
+                } catch (error) {
+                    console.error("❌ Error parsing user data:", error);
+                    localStorage.removeItem("user");
+                    await logoutUtil();
+                }
+            } else if (storedUser && !accessToken) {
+                // Có user nhưng không có token -> xóa user
+                console.log('⚠️ User data exists but no token, cleaning up...');
                 localStorage.removeItem("user");
-                logoutUtil();
             }
-        }
 
-        setLoading(false);
+            setLoading(false);
+        }
+        initializeAuth();
     }, []);
 
     const login = (userData: User, accessToken: string) => {

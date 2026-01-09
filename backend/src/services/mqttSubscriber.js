@@ -63,7 +63,7 @@ const processSensorReading = async (deviceId, sensorId, value, timestamp, io = n
         
         const historyId = insertResult.rows[0].id;
         const recordedAt = insertResult.rows[0].recorded_at;
-        console.log(`✅ Đã lưu vào sensor_data_history với id=${historyId} - sensor_id=${sensorDbId}, value=${value}, recorded_at=${recordedAt}`);
+        console.log(`✅ Đã lưu vào sensor_data_history với id=${historyId} - sensor_id=${sensorDbId}, value=${value}`);
         
         // Cập nhật devices.latest_data và last_seen
         const updateDeviceQuery = `

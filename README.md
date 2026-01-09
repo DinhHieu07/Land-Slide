@@ -2,7 +2,6 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-DinhHieu07/Land--Slide-blue)](https://github.com/DinhHieu07/Land-Slide)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-green)](https://land-slide.vercel.app/)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 > Hệ thống giám sát sạt lở đất thời gian thực sử dụng IoT, bản đồ số và dashboard web để theo dõi và cảnh báo sớm các nguy cơ sạt lở đất.
 

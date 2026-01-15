@@ -32,17 +32,17 @@ import Header from "@/components/Header";
 const featureCards = [
     {
         title: "Quan trắc thời gian thực",
-        desc: "Nhận dữ liệu sensor (MQTT/REST), hiển thị bản đồ và dashboard ngay lập tức.",
+        desc: "Nhận dữ liệu sensor từ MQTT Broker, hiển thị bản đồ và dashboard ngay lập tức.",
         icon: <Radio className="size-5 text-blue-600" />,
     },
     {
-        title: "Bản đồ nguy cơ",
-        desc: "Lớp bản đồ thiết bị, cảnh báo, khu vực; hỗ trợ zoom tới điểm chi tiết.",
+        title: "Bản đồ",
+        desc: "Lớp bản đồ thiết bị; hỗ trợ zoom tới điểm chi tiết.",
         icon: <Map className="size-5 text-amber-600" />,
     },
     {
         title: "Cảnh báo đa kênh",
-        desc: "WebSocket/REST; phân loại mức độ rõ ràng.",
+        desc: "WebSocket; phân loại mức độ rõ ràng.",
         icon: <Bell className="size-5 text-red-600" />,
     },
     {
@@ -93,7 +93,7 @@ export default function HomePage() {
                 <SidebarInset>
                     <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b bg-white overflow-hidden">
                         <div className="flex-shrink-0 min-w-0 space-y-1">
-                            <p className="text-xs sm:text-sm text-muted-foreground truncate">Hệ thống giám sát sạt lở đất</p>
+                            <p className="text-xs sm:text-sm text-muted-foreground truncate">Hệ thống quản lý sạt lở đất</p>
                             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Trang chủ</h1>
                         </div>
                         <Header />

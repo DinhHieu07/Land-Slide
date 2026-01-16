@@ -44,7 +44,7 @@ const checkOfflineDevices = async (timeoutMinutes = 5, createAlert = true) => {
                 // Cập nhật trạng thái sang 'offline'
                 const updateQuery = `
                     UPDATE devices 
-                    SET status = 'offline', updated_at = NOW()
+                    SET status = 'disconnected', updated_at = NOW()
                     WHERE id = $1
                     RETURNING id, device_id, name, status, last_seen
                 `;
@@ -62,7 +62,7 @@ const checkOfflineDevices = async (timeoutMinutes = 5, createAlert = true) => {
                     if (io) {
                         io.emit('device_status_updated', {
                             device_id: device.device_id,
-                            status: 'offline',
+                            status: 'disconnected',
                             last_seen: device.last_seen,
                             updated_at: new Date().toISOString()
                         });

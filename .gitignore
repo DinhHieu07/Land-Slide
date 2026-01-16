@@ -59,3 +59,4 @@ build/
 *.tsbuildinfo
 
 backend/migrations/
+frontend/KICH_BAN_BAO_CAO.md

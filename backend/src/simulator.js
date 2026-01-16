@@ -2,7 +2,6 @@ require('dotenv').config();
 
 const mqtt = require('mqtt');
 
-// Cấu hình MQTT
 const options = {
     host: process.env.MQTT_HOST,
     port: parseInt(process.env.MQTT_PORT),
@@ -12,7 +11,6 @@ const options = {
     rejectUnauthorized: true,
 };
 
-// Device ID để giả lập 
 const DEVICE_ID = process.env.SIMULATOR_DEVICE_ID || 'HG-GW001';
 
 console.log(`Đang kết nối tới HiveMQ cho device: ${DEVICE_ID}...`);
@@ -63,7 +61,6 @@ client.on('connect', () => {
             console.log("⚠️ CẢNH BÁO: Độ dốc vượt ngưỡng!");
         }
 
-        // Tạo payload
         const payload = JSON.stringify({
             device_id: DEVICE_ID,
             timestamp: timestamp,
@@ -76,7 +73,6 @@ client.on('connect', () => {
             ]
         });
 
-        // Gửi lên topic
         const topic = process.env.MQTT_TOPIC;
         client.publish(topic, payload);
         console.log(` [${DEVICE_ID}] Đã gửi ${payload.length} bytes`);

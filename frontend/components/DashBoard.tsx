@@ -626,7 +626,7 @@ export default function DashboardView() {
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                     <Card className="border-l-4 border-l-red-500">
                         <CardHeader className="pb-2">
-                            <CardDescription>Đang bị lỗi</CardDescription>
+                            <CardDescription>Chưa xử lý</CardDescription>
                             <CardTitle className="text-3xl font-bold text-red-600">{alertStats.active_count}</CardTitle>
                         </CardHeader>
                         <CardContent>

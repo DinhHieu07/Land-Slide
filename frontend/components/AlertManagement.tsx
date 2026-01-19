@@ -267,7 +267,7 @@ export default function AlertManagement() {
 
     // Nhóm cảnh báo nghiêm trọng và đang bị lỗi
     const criticalAlerts = useMemo(() =>
-        alerts.filter(a => a.severity === 'critical' && a.status === 'active').slice(0, 5),
+        alerts.filter(a => a.severity === 'critical' && a.status === 'active').slice(0, 3),
         [alerts]
     );
 

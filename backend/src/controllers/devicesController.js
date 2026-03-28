@@ -67,11 +67,14 @@ const listDevices = async (req, res) => {
                 d.created_at,
                 d.updated_at,
                 d.province_id,
+                d.area_id,
                 p.name AS province_name,
                 p.code AS province_code,
+                a.name AS area_name,
                 mgr.managers
             FROM devices d
             LEFT JOIN provinces p ON d.province_id = p.id
+            LEFT JOIN areas a ON d.area_id = a.id
             ${usernameJoin}
             LEFT JOIN LATERAL (
                 SELECT 

@@ -2,13 +2,31 @@ const pool = require('../config/db');
 
 const listAreas = async (req, res) => {
     try {
-        const sql = `SELECT id, name, description,
-                    ST_AsGeoJSON(geom)::json AS geomjson,
-                    created_at
-                    FROM areas
-                    ORDER BY id
-                    `
-        const { rows } = await pool.query(sql);
+        const { provinceCode } = req.query;
+        const params = [];
+        let whereClause = '';
+
+        if (provinceCode) {
+            params.push(provinceCode);
+            whereClause = `WHERE p.code = $1`;
+        }
+
+        const sql = `
+            SELECT
+                a.id,
+                a.name,
+                a.description,
+                ST_AsGeoJSON(a.geom)::json AS geomjson,
+                a.created_at,
+                p.id AS province_id,
+                p.code AS province_code,
+                p.name AS province_name
+            FROM areas a
+            LEFT JOIN provinces p ON p.id = a.province_id
+            ${whereClause}
+            ORDER BY a.id
+        `;
+        const { rows } = await pool.query(sql, params);
         return res.status(200).json({ message: 'Success', data: rows });
     } catch (error) {
         console.error('Lỗi khi lấy danh sách khu vực:', error);

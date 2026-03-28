@@ -119,7 +119,7 @@ export default function DeviceManager() {
         }
     };
     const username = getUsername();
-    
+
     const fetchDevices = async () => {
         const params = new URLSearchParams();
         if (debouncedSearch) params.append("search", debouncedSearch);
@@ -514,8 +514,8 @@ export default function DeviceManager() {
                 </div>
             </div>
             <div className="flex justify-end">
-                <Dialog 
-                    open={openDialog} 
+                <Dialog
+                    open={openDialog}
                     onOpenChange={(open) => {
                         setOpenDialog(open);
                         if (!open) {

@@ -26,7 +26,7 @@ const sendAlertEmail = async (recipients, alertData) => {
         const msg = {
             to: recipients,
             from: fromEmail,
-            subject: `🚨 CẢNH BÁO: ${alertData.title}`,
+            subject: `CẢNH BÁO: ${alertData.title}`,
             html: emailHtml,
         };
 
@@ -135,7 +135,7 @@ const generateAlertEmailHtml = (alertData) => {
                             <!-- Header -->
                             <tr>
                                 <td style="background: linear-gradient(135deg, ${severityColor} 0%, ${severityColor}dd 100%); padding: 30px 20px; text-align: center;">
-                                    <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">🚨 CẢNH BÁO HỆ THỐNG</h1>
+                                    <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;"> CẢNH BÁO HỆ THỐNG</h1>
                                 </td>
                             </tr>
                             

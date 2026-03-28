@@ -72,8 +72,17 @@ export default function HistoryView() {
     const [activeTab, setActiveTab] = useState("alerts");
 
     // Alert filters
-    const [alertStartDate, setAlertStartDate] = useState("");
-    const [alertEndDate, setAlertEndDate] = useState("");
+    const defaultRange24h = (() => {
+        const now = dayjs();
+        const start = now.subtract(24, "hour");
+        return {
+            start: start.format("YYYY-MM-DDTHH:mm"),
+            end: now.format("YYYY-MM-DDTHH:mm"),
+        };
+    })();
+
+    const [alertStartDate, setAlertStartDate] = useState(defaultRange24h.start);
+    const [alertEndDate, setAlertEndDate] = useState(defaultRange24h.end);
     const [alertSeverity, setAlertSeverity] = useState("all");
     const [alertStatus, setAlertStatus] = useState("all");
     const [alertCategory, setAlertCategory] = useState("all");
@@ -93,8 +102,8 @@ export default function HistoryView() {
 
     // Sensor data filters
     const [sensorDeviceId, setSensorDeviceId] = useState("all");
-    const [sensorStartDate, setSensorStartDate] = useState("");
-    const [sensorEndDate, setSensorEndDate] = useState("");
+    const [sensorStartDate, setSensorStartDate] = useState(defaultRange24h.start);
+    const [sensorEndDate, setSensorEndDate] = useState(defaultRange24h.end);
     const [sensorQuery, setSensorQuery] = useState("");
     const [debouncedSensorQuery, setDebouncedSensorQuery] = useState("");
     const [sensorData, setSensorData] = useState<SensorDataHistory[]>([]);
@@ -223,6 +232,8 @@ export default function HistoryView() {
             if (alertSeverity !== "all") params.append("severity", alertSeverity);
             if (alertStatus !== "all") params.append("status", alertStatus);
             if (alertCategory !== "all") params.append("category", alertCategory);
+            if (alertStartDate) params.append("start_date", alertStartDate);
+            if (alertEndDate) params.append("end_date", alertEndDate);
             params.append("limit", pageSize.toString());
             params.append("offset", ((alertPage - 1) * pageSize).toString());
 
@@ -231,25 +242,10 @@ export default function HistoryView() {
             });
             const data = await res.json();
             if (res.ok && data.success) {
-                let filteredData = data.data || [];
-                if (alertStartDate || alertEndDate) {
-                    filteredData = filteredData.filter((alert: Alert) => {
-                        const alertDate = new Date(alert.created_at);
-                        if (alertStartDate) {
-                            const startDate = new Date(alertStartDate);
-                            if (alertDate < startDate) return false;
-                        }
-                        if (alertEndDate) {
-                            const endDate = new Date(alertEndDate);
-                            endDate.setHours(23, 59, 59, 999);
-                            if (alertDate > endDate) return false;
-                        }
-                        return true;
-                    });
-                }
-                setAlerts(filteredData);
+                const serverData = data.data || [];
+                setAlerts(serverData);
                 setAlertTotalPages(data.pagination?.totalPages || 1);
-                setAlertTotal(filteredData.length || data.pagination?.total || 0);
+                setAlertTotal(data.pagination?.total || serverData.length || 0);
             } else {
                 setAlerts([]);
                 setAlertTotal(0);

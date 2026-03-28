@@ -5,32 +5,310 @@ const { sendAlertEmail } = require('./emailService');
 // Khởi tạo MQTT client
 let mqttClient = null;
 
-// Hàm xử lý dữ liệu cảm biến từ MQTT
-const processSensorReading = async (deviceId, sensorId, value, timestamp, io = null) => {
+const TYPE_TO_CODE_SUFFIX = {
+    rainfall_24h: 'RAIN',
+    soil_moisture: 'SOIL',
+    vibration_g: 'VIB',
+    tilt_deg: 'TILT',
+    slope_deg: 'SLOPE',
+    rain: 'RAIN',
+    soil: 'SOIL',
+    vibration: 'VIB',
+    tilt: 'TILT',
+    alert: 'ALERT',
+};
+
+function buildSensorLookupKey(sensorCode, value) {
+    if (value === undefined || value === null || Number.isNaN(Number(value))) {
+        return null;
+    }
+    if (!sensorCode) {
+        return null;
+    }
+
+    const normalized = String(sensorCode).trim().toLowerCase();
+    return TYPE_TO_CODE_SUFFIX[normalized] || normalized.toUpperCase();
+}
+
+async function tryUpdateNodeState(deviceCode, nodeId, sensorType, sensorUnit, value, timestamp) {
+    if (!nodeId) return;
     try {
-        // Tìm sensor theo device_id và code
+        const typeKey = String(sensorType || 'unknown').trim();
+        const unitKey = String(sensorUnit || '').trim();
+        const latestDataKey = `${typeKey} (${unitKey})`;
+        await pool.query(
+            `
+            UPDATE nodes n
+            SET
+                last_seen = COALESCE($3::timestamptz, NOW()),
+                updated_at = NOW(),
+                latest_data = jsonb_set(
+                    COALESCE(n.latest_data, '{}'::jsonb),
+                    ARRAY[$4::text],
+                    to_jsonb($5::numeric),
+                    true
+                ),
+                status = CASE
+                    WHEN n.status = 'disconnected' THEN 'online'
+                    ELSE n.status
+                END
+            FROM devices d
+            WHERE n.device_id = d.id
+              AND d.device_id = $1
+              AND n.node_id = $2
+            `,
+            [deviceCode, nodeId, timestamp || null, latestDataKey, value]
+        );
+    } catch (e) {
+        if (e.code === '42P01' || e.code === '42703') {
+            return;
+        }
+        console.warn('[MQTT] tryUpdateNodeState:', e.message);
+    }
+}
+
+async function createGatewayAlertFromLevel(deviceId, nodeId, alertLevel, timestamp, io = null) {
+    const level = Number(alertLevel);
+    if (!Number.isFinite(level) || level <= 1) {
+        return;
+    }
+
+    const severity = level == 3 ? 'critical' : 'warning';
+    const levelLabel = level == 3 ? 'Nguy hiểm' : 'Cảnh báo';
+    const alertTitle = `Cảnh báo Gateway ${deviceId}${nodeId ? ` - Node ${nodeId}` : ''}`;
+    const message = `Gateway gửi mức ${levelLabel} (level=${level})`;
+
+    const deviceResult = await pool.query(
+        `
+        SELECT
+            d.id as device_db_id,
+            d.device_id as device_code,
+            d.name as device_name,
+            d.province_id
+        FROM devices d
+        WHERE d.device_id = $1
+        LIMIT 1
+        `,
+        [deviceId]
+    );
+
+    if (deviceResult.rows.length === 0) {
+        console.warn(` Không tìm thấy device cho alert: ${deviceId}`);
+        return;
+    }
+
+    const device = deviceResult.rows[0];
+    let nodeLatestData = null;
+    if (nodeId) {
+        try {
+            const nodeResult = await pool.query(
+                `
+                SELECT n.latest_data
+                FROM nodes n
+                WHERE n.device_id = $1 AND n.node_id = $2
+                LIMIT 1
+                `,
+                [device.device_db_id, nodeId]
+            );
+            nodeLatestData = nodeResult.rows[0]?.latest_data || null;
+        } catch (error) {
+            console.warn(`[MQTT] Không lấy được latest_data của node ${nodeId}:`, error.message);
+        }
+    }
+
+    const evidenceData = {
+        source: 'gateway',
+        node_id: nodeId || undefined,
+        alert_level: level,
+        node_latest_data: nodeLatestData,
+        timestamp: timestamp || new Date().toISOString(),
+    };
+
+    const alertResult = await pool.query(
+        `
+        INSERT INTO alerts (
+            device_id,
+            sensor_id,
+            title,
+            message,
+            severity,
+            triggered_value,
+            category,
+            evidence_data,
+            status
+        )
+        VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 'active')
+        RETURNING *
+        `,
+        [
+            device.device_db_id,
+            alertTitle,
+            message,
+            severity,
+            level,
+            'threshold',
+            JSON.stringify(evidenceData),
+        ]
+    );
+
+    const alert = alertResult.rows[0];
+    const fullAlertResult = await pool.query(
+        `
+        SELECT
+            a.id,
+            a.device_id,
+            a.sensor_id,
+            a.title,
+            a.message,
+            a.severity,
+            a.triggered_value,
+            a.status,
+            a.resolved_by,
+            a.resolved_at,
+            a.resolved_note,
+            a.category,
+            a.evidence_data,
+            a.created_at,
+            a.updated_at,
+            d.device_id as device_code,
+            d.name as device_name,
+            d.province_id,
+            p.name as province_name,
+            p.code as province_code,
+            s.code as sensor_code,
+            s.name as sensor_name,
+            s.type as sensor_type,
+            u.username as resolved_by_username
+        FROM alerts a
+        LEFT JOIN devices d ON a.device_id = d.id
+        LEFT JOIN provinces p ON d.province_id = p.id
+        LEFT JOIN sensors s ON a.sensor_id = s.id
+        LEFT JOIN users u ON a.resolved_by = u.id
+        WHERE a.id = $1
+        `,
+        [alert.id]
+    );
+    const fullAlert = fullAlertResult.rows[0] || alert;
+
+    if (fullAlert.evidence_data && typeof fullAlert.evidence_data === 'string') {
+        try {
+            fullAlert.evidence_data = JSON.parse(fullAlert.evidence_data);
+        } catch (e) {
+            // giữ nguyên nếu parse không được
+        }
+    }
+
+    void notifyAlertByEmail(fullAlert);
+
+    if (io) {
+        io.emit('new_alert', fullAlert);
+    }
+}
+
+function buildManagersEmailQuery() {
+    return `
+        SELECT DISTINCT
+            u.id,
+            u.username,
+            u.role,
+            (u.username || '@' || $1::text) as email
+        FROM users u
+        INNER JOIN user_provinces up ON u.id = up.user_id
+        WHERE up.province_id = $2
+        UNION
+        SELECT
+            id,
+            username,
+            role,
+            (username || '@' || $1::text) as email
+        FROM users
+        WHERE role = 'superAdmin'
+    `;
+}
+
+async function getRecipientEmailsByProvince(provinceId) {
+    if (!provinceId) {
+        return [];
+    }
+
+    const emailDomain = process.env.EMAIL_DOMAIN || 'https://land-slide.vercel.app';
+    const managersQuery = buildManagersEmailQuery();
+    const managersResult = await pool.query(managersQuery, [emailDomain, provinceId]);
+
+    return managersResult.rows
+        .map((row) => row.email)
+        .filter((email) => email && email.includes('@') && email.indexOf('@') === email.lastIndexOf('@'));
+}
+
+async function notifyAlertByEmail(fullAlert) {
+    try {
+        let recipientEmails = [];
+        try {
+            recipientEmails = await getRecipientEmailsByProvince(fullAlert.province_id);
+        } catch (error) {
+            console.error('Loi khi lay danh sach nguoi quan ly:', error);
+        }
+
+        if (recipientEmails.length === 0 && process.env.ALERT_EMAIL_RECIPIENT) {
+            recipientEmails = [process.env.ALERT_EMAIL_RECIPIENT];
+        }
+
+        if (recipientEmails.length > 0) {
+            // await sendAlertEmail(recipientEmails, fullAlert);
+        }
+    } catch (error) {
+        console.error('Loi gui email canh bao:', error);
+    }
+}
+
+// Hàm xử lý dữ liệu cảm biến từ MQTT
+const processSensorReading = async (deviceId, nodeId, sensorCode, value, timestamp, io = null) => {
+    try {
+        const normalizedSensorCode = buildSensorLookupKey(sensorCode, value);
+        if (!normalizedSensorCode) {
+            console.warn(` Sensor không hợp lệ: device=${deviceId}, node=${nodeId}, code=${sensorCode}, value=${value}`);
+            return;
+        }
+
+        if (normalizedSensorCode === 'ALERT') {
+            await createGatewayAlertFromLevel(deviceId, nodeId, value, timestamp, io);
+            return;
+        }
+
+        // Tìm sensor theo device_id + node_id + (sensor_code hoặc sensor_type)
         const sensorQuery = `
             SELECT 
                 s.id,
-                s.device_id as sensor_device_id,
+                s.node_id as sensor_node_id,
                 s.code as sensor_code,
                 s.name,
                 s.type,
                 s.min_threshold,
                 s.max_threshold,
                 s.unit,
+                n.id as node_db_id,
+                n.node_id as node_code,
                 d.id as device_db_id,
                 d.device_id as device_code
             FROM sensors s
-            INNER JOIN devices d ON s.device_id = d.id
-            WHERE d.device_id = $1 AND s.code = $2
+            INNER JOIN nodes n ON s.node_id = n.id
+            INNER JOIN devices d ON n.device_id = d.id
+            WHERE d.device_id = $1
+              AND n.node_id = $2
+              AND (
+                    UPPER(s.code) = UPPER($3)
+                    OR UPPER(s.type) = UPPER($3)
+                    OR UPPER(s.type) = UPPER($4)
+              )
+            ORDER BY CASE WHEN UPPER(s.code) = UPPER($3) THEN 0 ELSE 1 END
             LIMIT 1
         `;
-        
-        const sensorResult = await pool.query(sensorQuery, [deviceId, sensorId]);
+
+        const typeAlias = String(sensorCode || '').trim();
+        const sensorResult = await pool.query(sensorQuery, [deviceId, nodeId, normalizedSensorCode, typeAlias]);
         
         if (sensorResult.rows.length === 0) {
-            console.warn(` Không tìm thấy sensor: device_id=${deviceId}, code=${sensorId}`);
+            console.warn(` Không tìm thấy sensor: device_id=${deviceId}, node_id=${nodeId}, code=${sensorCode}`);
             return;
         }
         
@@ -52,7 +330,7 @@ const processSensorReading = async (deviceId, sensorId, value, timestamp, io = n
         } catch (insertError) {
             console.error(` Lỗi khi INSERT vào sensor_data_history:`, insertError);
             console.error(`Chi tiết: sensor_id=${sensorDbId}, value=${value}, error_code=${insertError.code}, error_message=${insertError.message}`);
-            throw insertError; // Re-throw để catch bên ngoài xử lý
+            throw insertError;
         }
         
         if (!insertResult || !insertResult.rows || insertResult.rows.length === 0) {
@@ -63,18 +341,13 @@ const processSensorReading = async (deviceId, sensorId, value, timestamp, io = n
         
         const historyId = insertResult.rows[0].id;
         const recordedAt = insertResult.rows[0].recorded_at;
-        console.log(`✅ Đã lưu vào sensor_data_history với id=${historyId} - sensor_id=${sensorDbId}, value=${value}`);
+        console.log(`Đã lưu vào sensor_data_history với id=${historyId} - sensor_id=${sensorDbId}, value=${value}`);
         
-        // Cập nhật devices.latest_data và last_seen
+        // Cập nhật devices.latest_data và last_seen (gộp theo node để không đè giữa nhiều node)
         const updateDeviceQuery = `
             UPDATE devices 
             SET 
-                latest_data = jsonb_set(
-                    COALESCE(latest_data, '{}'::jsonb),
-                    ARRAY[$1::text],
-                    to_jsonb($2::numeric),
-                    true
-                ),
+                latest_data = COALESCE(latest_data, '{}'::jsonb) || jsonb_build_object($1::text, $2::numeric),
                 last_seen = COALESCE($3::timestamptz, NOW()),
                 updated_at = NOW(),
                 status = CASE 
@@ -83,7 +356,17 @@ const processSensorReading = async (deviceId, sensorId, value, timestamp, io = n
                 END
             WHERE id = $4
         `;
-        await pool.query(updateDeviceQuery, [sensor.type, value, timestamp, deviceDbId]);
+
+        const nodeLatestKey = String(nodeId || 'unknown');
+        const sensorTypeKey = String(sensor.type || sensor.sensor_code || 'unknown').trim();
+        const sensorUnit = String(sensor.unit || '').trim();
+        const latestDataKey = `${nodeLatestKey}_${sensorTypeKey} (${sensorUnit})`;
+        const deviceUpdateResult = await pool.query(updateDeviceQuery, [latestDataKey, value, timestamp, deviceDbId]);
+        if (deviceUpdateResult.rowCount === 0) {
+            console.warn(` Không cập nhật được devices.latest_data: device_id=${deviceId}, device_db_id=${deviceDbId}`);
+        }
+
+        await tryUpdateNodeState(deviceId, nodeId, sensor.type, sensor.unit, value, timestamp);
         
         console.log(`Đã lưu: ${sensor.device_code} - ${sensor.name} (${sensor.sensor_code}) = ${value} ${sensor.unit || ''}`);
         
@@ -91,6 +374,8 @@ const processSensorReading = async (deviceId, sensorId, value, timestamp, io = n
         if (io) {
             io.emit('sensor_data_update', {
                 device_id: deviceId,
+                node_id: nodeId || undefined,
+                node_db_id: sensor.node_db_id,
                 device_db_id: deviceDbId,
                 sensor_id: sensorDbId,
                 sensor_code: sensor.sensor_code,
@@ -101,238 +386,6 @@ const processSensorReading = async (deviceId, sensorId, value, timestamp, io = n
                 recorded_at: recordedAt,
                 timestamp: timestamp || new Date().toISOString()
             });
-        }
-        
-        // Kiểm tra threshold và tạo alert nếu cần
-        let shouldCreateAlert = false;
-        let severity = 'info';
-        let message = '';
-        
-        if (sensor.min_threshold !== null && value < sensor.min_threshold) {
-            shouldCreateAlert = true;
-            severity = 'warning';
-            message = `${sensor.name} có giá trị ${value}${sensor.unit ? ' ' + sensor.unit : ''} thấp hơn ngưỡng tối thiểu ${sensor.min_threshold}${sensor.unit ? ' ' + sensor.unit : ''}`;
-        } else if (sensor.max_threshold !== null && value > sensor.max_threshold) {
-            shouldCreateAlert = true;
-            // Xác định mức độ nghiêm trọng dựa trên mức vượt ngưỡng
-            const thresholdDiff = value - sensor.max_threshold;
-            const thresholdPercent = (thresholdDiff / sensor.max_threshold) * 100;
-            
-            if (thresholdPercent > 50) {
-                severity = 'critical';
-            } else if (thresholdPercent > 20) {
-                severity = 'warning';
-            } else {
-                severity = 'info';
-            }
-            
-            message = `${sensor.name} có giá trị ${value}${sensor.unit ? ' ' + sensor.unit : ''} vượt ngưỡng tối đa ${sensor.max_threshold}${sensor.unit ? ' ' + sensor.unit : ''}`;
-        }
-        
-        if (shouldCreateAlert) {
-            // Tạo alert
-            const alertTitle = `Cảnh báo ${sensor.name} - ${sensor.device_code}`;
-            const alertQuery = `
-                INSERT INTO alerts (
-                    device_id, 
-                    sensor_id, 
-                    title, 
-                    message, 
-                    severity, 
-                    triggered_value, 
-                    category, 
-                    evidence_data, 
-                    status
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
-                RETURNING *
-            `;
-            
-            const evidenceData = {
-                sensor_code: sensor.sensor_code,
-                sensor_name: sensor.name,
-                sensor_type: sensor.type,
-                value: value,
-                unit: sensor.unit,
-                threshold: sensor.max_threshold !== null ? sensor.max_threshold : sensor.min_threshold,
-                device_code: sensor.device_code,
-                timestamp: timestamp || new Date().toISOString()
-            };
-            
-            const alertResult = await pool.query(alertQuery, [
-                deviceDbId,
-                sensorDbId,
-                alertTitle,
-                message,
-                severity,
-                value,
-                'threshold',
-                JSON.stringify(evidenceData)
-            ]);
-            
-            const alert = alertResult.rows[0];
-            
-            // Lấy thông tin đầy đủ của alert để gửi email và emit socket
-            const fullAlertQuery = `
-                SELECT 
-                    a.id,
-                    a.device_id,
-                    a.sensor_id,
-                    a.title,
-                    a.message,
-                    a.severity,
-                    a.triggered_value,
-                    a.status,
-                    a.resolved_by,
-                    a.resolved_at,
-                    a.resolved_note,
-                    a.category,
-                    a.evidence_data,
-                    a.created_at,
-                    a.updated_at,
-                    d.device_id as device_code,
-                    d.name as device_name,
-                    d.province_id,
-                    p.name as province_name,
-                    p.code as province_code,
-                    s.code as sensor_code,
-                    s.name as sensor_name,
-                    s.type as sensor_type,
-                    u.username as resolved_by_username
-                FROM alerts a
-                LEFT JOIN devices d ON a.device_id = d.id
-                LEFT JOIN provinces p ON d.province_id = p.id
-                LEFT JOIN sensors s ON a.sensor_id = s.id
-                LEFT JOIN users u ON a.resolved_by = u.id
-                WHERE a.id = $1
-            `;
-            const fullAlertResult = await pool.query(fullAlertQuery, [alert.id]);
-            const fullAlert = fullAlertResult.rows[0] || alert;
-            
-            // Parse evidence_data nếu là string
-            if (fullAlert.evidence_data && typeof fullAlert.evidence_data === 'string') {
-                try {
-                    fullAlert.evidence_data = JSON.parse(fullAlert.evidence_data);
-                } catch (e) {
-                    // Giữ nguyên nếu không parse được
-                }
-            }
-            
-            // Gửi email cảnh báo 
-            (async () => {
-                try {
-                    // Lấy danh sách người quản lý tỉnh thành
-                    let recipientEmails = [];
-                    
-                    if (fullAlert.province_id) {
-                        try {
-                            const checkEmailColumn = await pool.query(`
-                                SELECT column_name 
-                                FROM information_schema.columns 
-                                WHERE table_name = 'users' AND column_name = 'email'
-                            `);
-                            
-                            const hasEmailColumn = checkEmailColumn.rows.length > 0;
-                            const emailDomain = process.env.EMAIL_DOMAIN || 'landslide-monitoring.com';
-                            
-                            let managersQuery;
-                            if (hasEmailColumn) {
-                                managersQuery = `
-                                    SELECT DISTINCT 
-                                        u.id,
-                                        u.username,
-                                        u.role,
-                                        COALESCE(u.email, u.username || '@' || $1::text) as email
-                                    FROM users u
-                                    INNER JOIN user_provinces up ON u.id = up.user_id
-                                    WHERE up.province_id = $2
-                                    UNION
-                                    SELECT 
-                                        id,
-                                        username,
-                                        role,
-                                        COALESCE(email, username || '@' || $1::text) as email
-                                    FROM users
-                                    WHERE role = 'superAdmin'
-                                `;
-                            } else {
-                                managersQuery = `
-                                    SELECT DISTINCT 
-                                        u.id,
-                                        u.username,
-                                        u.role,
-                                        (u.username || '@' || $1::text) as email
-                                    FROM users u
-                                    INNER JOIN user_provinces up ON u.id = up.user_id
-                                    WHERE up.province_id = $2
-                                    UNION
-                                    SELECT 
-                                        id,
-                                        username,
-                                        role,
-                                        (username || '@' || $1::text) as email
-                                    FROM users
-                                    WHERE role = 'superAdmin'
-                                `;
-                            }
-                            
-                            const managersResult = await pool.query(managersQuery, [emailDomain, fullAlert.province_id]);
-                            
-                            recipientEmails = managersResult.rows
-                                .map(row => {
-                                    let email = row.email;
-                                    if (!email) return null;
-                                    
-                                    const parts = email.split('@');
-                                    if (parts.length > 2) {
-                                        const firstPart = parts[0];
-                                        const lastPart = parts[parts.length - 1];
-                                        
-                                        if (lastPart === emailDomain) {
-                                            email = parts.slice(0, -1).join('@');
-                                        } else {
-                                            email = `${firstPart}@${lastPart}`;
-                                        }
-                                    }
-                                    
-                                    if (email && email.includes('@') && email.indexOf('@') === email.lastIndexOf('@')) {
-                                        return email;
-                                    }
-                                    return null;
-                                })
-                                .filter(email => email && email.includes('@'));
-                            
-                            console.log(`Tìm thấy ${recipientEmails.length} người quản lý cho cảnh báo`);
-                        } catch (error) {
-                            console.error('Lỗi khi lấy danh sách người quản lý:', error);
-                        }
-                    }
-                    
-                    if (recipientEmails.length === 0) {
-                        const defaultEmail = process.env.ALERT_EMAIL_RECIPIENT;
-                        if (defaultEmail) {
-                            recipientEmails = [defaultEmail];
-                        }
-                    }
-                    
-                    if (recipientEmails.length > 0) {
-                        await sendAlertEmail(recipientEmails, fullAlert);
-                        console.log(` Đã gửi email cảnh báo tới ${recipientEmails.length} người nhận`);
-                    }
-                } catch (error) {
-                    console.error('Lỗi khi gửi email cảnh báo:', error);
-                }
-            })();
-            
-            // Emit socket event để frontend cập nhật real-time
-            if (io) {
-                io.emit('new_alert', fullAlert);
-                console.log(`Đã emit socket event 'new_alert' cho frontend`);
-            } else {
-                console.warn(` Không có io instance để emit socket event`);
-            }
-            
-            console.log(`Đã tạo cảnh báo: ${alertTitle} - ${message}`);
         }
         
     } catch (error) {
@@ -378,33 +431,31 @@ const initMqttSubscriber = (io) => {
             console.log(` Nhận dữ liệu từ MQTT:`, data);
             
             // Kiểm tra format dữ liệu
-            if (!data.device_id) {
+            if (!data.device) {
                 console.warn(' Dữ liệu thiếu device_id');
                 return;
             }
-            
-            if (!data.readings || !Array.isArray(data.readings)) {
-                console.warn(' Dữ liệu thiếu readings hoặc không phải array');
+
+            if (!data.node) {
+                console.warn(' Dữ liệu thiếu node');
                 return;
             }
             
-            // Xử lý từng sensor reading
-            for (const reading of data.readings) {
-                if (!reading.sensor_id || reading.value === undefined || reading.value === null) {
-                    console.warn(` Reading không hợp lệ:`, reading);
-                    continue;
-                }
-                
-                await processSensorReading(
-                    data.device_id,
-                    reading.sensor_id,
-                    parseFloat(reading.value),
-                    data.timestamp || null,
-                    io
-                );
-            }
+            const nodeId = data.node;
+
+            const sensorDatas = {
+                rain: data.rain,
+                soil: data.soil,
+                tilt: data.tilt,
+                vibration: data.vibration,
+                alert: data.alert
+            };
+
+            //Xử lý từng sensor 
+            await Promise.all([
+                ['rain', 'soil', 'tilt', 'vibration', 'alert'].map(sensorCode => processSensorReading(data.device, nodeId, sensorCode, parseFloat(sensorDatas[sensorCode]), data.timestamp || null, io))
+            ]);
         
-            
         } catch (error) {
             console.error('Lỗi khi xử lý message MQTT:', error);
             console.error('Message:', message.toString());

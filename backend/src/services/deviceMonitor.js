@@ -5,7 +5,7 @@ const { sendAlertEmail } = require('./emailService');
 let io = null;
 let monitorInterval = null;
 
-const checkOfflineDevices = async (timeoutMinutes = 5, createAlert = true) => {
+const checkOfflineDevices = async (timeoutMinutes = 30, createAlert = true) => {
     try {
         const timeoutInterval = `${timeoutMinutes} minutes`;
         
@@ -36,7 +36,7 @@ const checkOfflineDevices = async (timeoutMinutes = 5, createAlert = true) => {
             return;
         }
 
-        console.log(`[DeviceMonitor] Tìm thấy ${offlineDevices.length} thiết bị cần chuyển sang offline`);
+        console.log(`[DeviceMonitor] Tìm thấy ${offlineDevices.length} thiết bị cần chuyển sang disconnected`);
 
         // Cập nhật trạng thái và tạo alert cho từng thiết bị
         for (const device of offlineDevices) {
@@ -51,7 +51,7 @@ const checkOfflineDevices = async (timeoutMinutes = 5, createAlert = true) => {
                 const updateResult = await pool.query(updateQuery, [device.id]);
                 
                 if (updateResult.rows.length > 0) {
-                    console.log(`[DeviceMonitor] ✅ Đã chuyển thiết bị ${device.device_id} (${device.name}) sang offline`);
+                    console.log(`[DeviceMonitor] Đã chuyển thiết bị ${device.device_id} (${device.name}) sang disconnected`);
                     
                     // Tạo alert nếu được bật
                     if (createAlert) {
@@ -212,13 +212,13 @@ const createOfflineAlert = async (device) => {
             io.emit('new_alert', fullAlert);
         }
 
-        console.log(`[DeviceMonitor] ✅ Đã tạo alert cho thiết bị ${device.device_id}`);
+        console.log(`[DeviceMonitor] Đã tạo alert cho thiết bị ${device.device_id}`);
     } catch (error) {
-        console.error('[DeviceMonitor] ❌ Lỗi khi tạo alert:', error);
+        console.error('[DeviceMonitor] Lỗi khi tạo alert:', error);
     }
 };
 
-const startDeviceMonitor = (socketIO, schedule = '*/1 * * * *', timeoutMinutes = 5, createAlert = true) => {
+const startDeviceMonitor = (socketIO, schedule = '*/1 * * * *', timeoutMinutes = 30, createAlert = true) => {
     if (monitorInterval) {
         console.log('[DeviceMonitor] Cronjob đã được khởi động');
         return;
@@ -237,8 +237,8 @@ const startDeviceMonitor = (socketIO, schedule = '*/1 * * * *', timeoutMinutes =
         timezone: "Asia/Ho_Chi_Minh"
     });
 
-    console.log(`[DeviceMonitor] ✅ Đã khởi động cronjob kiểm tra thiết bị offline`);
-    console.log(`[DeviceMonitor] - Schedule: ${schedule} (mỗi 5 phút)`);
+    console.log(`[DeviceMonitor] Đã khởi động cronjob kiểm tra thiết bị offline`);
+    console.log(`[DeviceMonitor] - Schedule: ${schedule} (mỗi ${timeoutMinutes} phút)`);
     console.log(`[DeviceMonitor] - Timeout: ${timeoutMinutes} phút`);
     console.log(`[DeviceMonitor] - Tạo alert: ${createAlert ? 'Có' : 'Không'}`);
 };

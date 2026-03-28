@@ -11,12 +11,24 @@ const listAlerts = async (req, res) => {
             category,
             deviceId,
             username,
+            start_date,
+            end_date,
             limit = 10, 
             offset = 0 
         } = req.query;
 
         const conditions = [];
         const values = [];
+
+        if (start_date) {
+            values.push(start_date);
+            conditions.push(`a.created_at >= $${values.length}`);
+        }
+
+        if (end_date) {
+            values.push(end_date);
+            conditions.push(`a.created_at <= ($${values.length}::timestamp + interval '23 hours 59 minutes 59 seconds')`);
+        }
 
         if (search) {
             values.push(`%${search}%`);

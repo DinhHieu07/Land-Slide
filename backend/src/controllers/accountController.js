@@ -170,6 +170,9 @@ const updateAccount = async (req, res) => {
         const params = [];
         let paramCount = 0;
 
+        console.log(username);
+        console.log(role);
+
         if (username) {
             // Kiểm tra username đã tồn tại (trừ chính tài khoản này)
             const checkUsername = await pool.query(
@@ -199,10 +202,12 @@ const updateAccount = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Không có dữ liệu để cập nhật' });
         }
 
-        paramCount++;
         updateFields.push(`updated_at = NOW()`);
         paramCount++;
         params.push(id);
+
+        console.log(paramCount);
+        console.log(updateFields);
 
         const query = `
             UPDATE users 

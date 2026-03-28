@@ -29,8 +29,17 @@ import {
     Info,
     History,
     User,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import {
     BarChart as RechartsBarChart,
     Bar,
@@ -78,6 +87,7 @@ type DashboardStats = {
     };
     alerts: {
         total: number;
+        topProvincesLast30Days?: Array<{ province_code: string; province_name: string; count: number }>;
     };
     areas: {
         total: number;
@@ -120,6 +130,41 @@ type DeviceOption = {
     name: string;
 };
 
+type ProvinceArea = {
+    province_code: string;
+    province_name: string;
+    count: number;
+};
+
+type DeviceListItem = {
+    device_id: string;
+    name: string | null;
+    area_id?: number | null;
+    area_name?: string | null;
+    province_code?: string | null;
+    province_name?: string | null;
+    status?: string | null;
+    last_seen?: string | null;
+    latest_data?: Record<string, unknown> | null;
+};
+
+type AreaNodeData = {
+    node_key: string;
+    node_id: string;
+    device_id: string;
+    device_name: string;
+    area_id: number | null;
+    area_name: string;
+    province_code: string | null;
+    province_name: string;
+    sensors: DeviceSensorData[];
+};
+
+type AreaOption = {
+    id: number;
+    name: string;
+};
+
 type AlertStats = {
     active_count: number;
     acknowledged_count: number;
@@ -143,13 +188,30 @@ export default function DashboardView() {
     const [loadingAlertStats, setLoadingAlertStats] = useState(true);
     const [provincePage, setProvincePage] = useState(1);
     const itemsPerPage = 3;
-    
+
     // State cho section chi tiết theo thiết bị
     const [devices, setDevices] = useState<DeviceOption[]>([]);
+    const [allDevices, setAllDevices] = useState<DeviceListItem[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
     const [deviceSensorData, setDeviceSensorData] = useState<DeviceSensorData[]>([]);
     const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
     const [loadingDeviceData, setLoadingDeviceData] = useState(false);
+    const deviceDetailRef = useRef<HTMLDivElement | null>(null);
+
+    // State cho popup khu vực (theo tỉnh/thành)
+    const [areaDialogOpen, setAreaDialogOpen] = useState(false);
+    const [selectedArea, setSelectedArea] = useState<ProvinceArea | null>(null);
+    const [areaDevices, setAreaDevices] = useState<DeviceOption[]>([]);
+    const [selectedAreaDeviceId, setSelectedAreaDeviceId] = useState<string>("");
+    const [areaDeviceSensorData, setAreaDeviceSensorData] = useState<DeviceSensorData[]>([]);
+    const [areaDeviceInfo, setAreaDeviceInfo] = useState<DeviceInfo | null>(null);
+    const [loadingAreaDeviceData, setLoadingAreaDeviceData] = useState(false);
+    const [selectedProvinceCode, setSelectedProvinceCode] = useState<string>("all");
+    const [selectedAreaId, setSelectedAreaId] = useState<string>("all");
+    const [areaOptions, setAreaOptions] = useState<AreaOption[]>([]);
+    const [areaNodeData, setAreaNodeData] = useState<AreaNodeData[]>([]);
+    const [loadingAreaNodes, setLoadingAreaNodes] = useState(false);
+    const [currentNodeIndex, setCurrentNodeIndex] = useState(0);
 
     // Lấy username từ localStorage (nếu có)
     const getUsername = () => {
@@ -212,30 +274,30 @@ export default function DashboardView() {
             const recordedAt = new Date(data.recorded_at);
             const timeBucket = new Date(recordedAt);
             timeBucket.setMinutes(0, 0, 0); // Round to hour
-            
+
             // Cập nhật trực tiếp vào state để biểu đồ tự động cập nhật ngay
             if (!selectedDeviceId) {
                 // Cập nhật biểu đồ tổng quan
                 setSensorSeries((prev) => {
                     const newSeries = { ...prev };
                     const sensorType = data.sensor_type;
-                    
+
                     if (!newSeries[sensorType]) {
                         newSeries[sensorType] = [];
                     }
-                    
+
                     // Tìm xem đã có data point cho time bucket này chưa
                     const existingIndex = newSeries[sensorType].findIndex(
                         (item) => new Date(item.time).getTime() === timeBucket.getTime()
                     );
-                    
+
                     if (existingIndex >= 0) {
                         // Cập nhật existing point
                         const existing = newSeries[sensorType][existingIndex];
                         newSeries[sensorType][existingIndex] = {
                             ...existing,
                             count: existing.count + 1,
-                            avg_value: existing.avg_value !== null 
+                            avg_value: existing.avg_value !== null
                                 ? (existing.avg_value * existing.count + data.value) / (existing.count + 1)
                                 : data.value
                         };
@@ -247,12 +309,12 @@ export default function DashboardView() {
                             avg_value: data.value
                         });
                     }
-                    
+
                     // Giữ tối đa 24 giờ gần nhất
                     newSeries[sensorType] = newSeries[sensorType]
                         .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
                         .slice(-24);
-                    
+
                     return newSeries;
                 });
             } else if (data.device_id === selectedDeviceId) {
@@ -260,11 +322,11 @@ export default function DashboardView() {
                 setDeviceSensorData((prev) => {
                     const newData = [...prev];
                     const sensorKey = `${data.sensor_code}_${data.sensor_type}`;
-                    
+
                     let sensorIndex = newData.findIndex(
                         (s) => s.sensor_code === data.sensor_code && s.sensor_type === data.sensor_type
                     );
-                    
+
                     if (sensorIndex < 0) {
                         // Thêm sensor mới
                         newData.push({
@@ -275,12 +337,12 @@ export default function DashboardView() {
                         });
                         sensorIndex = newData.length - 1;
                     }
-                    
+
                     const sensor = newData[sensorIndex];
                     const existingIndex = sensor.data.findIndex(
                         (item) => new Date(item.time).getTime() === timeBucket.getTime()
                     );
-                    
+
                     if (existingIndex >= 0) {
                         // Cập nhật existing point
                         const existing = sensor.data[existingIndex];
@@ -291,7 +353,7 @@ export default function DashboardView() {
                             avg_value: existing.avg_value !== null
                                 ? (existing.avg_value * existing.count + data.value) / newCount
                                 : data.value,
-                            min_value: existing.min_value !== null 
+                            min_value: existing.min_value !== null
                                 ? Math.min(existing.min_value, data.value)
                                 : data.value,
                             max_value: existing.max_value !== null
@@ -308,21 +370,21 @@ export default function DashboardView() {
                             max_value: data.value
                         });
                     }
-                    
+
                     // Giữ tối đa 24 giờ gần nhất
                     sensor.data = sensor.data
                         .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
                         .slice(-24);
-                    
+
                     return newData;
                 });
             }
-            
+
             // Debounce: sync với server sau 5 giây để đảm bảo dữ liệu chính xác
             if (sensorUpdateTimeoutRef.current) {
                 clearTimeout(sensorUpdateTimeoutRef.current);
             }
-            
+
             sensorUpdateTimeoutRef.current = setTimeout(() => {
                 if (!selectedDeviceId) {
                     fetchSensorStats();
@@ -450,14 +512,18 @@ export default function DashboardView() {
             });
             const data = await res.json();
             if (res.ok && data.success) {
+                setAllDevices((data.data || []) as DeviceListItem[]);
                 const deviceOptions = (data.data || []).map((d: { device_id: string; name: string }) => ({
                     device_id: d.device_id,
                     name: d.name || d.device_id,
                 }));
                 setDevices(deviceOptions);
+            } else {
+                setAllDevices([]);
             }
         } catch (error) {
             console.error("Lỗi khi lấy danh sách thiết bị:", error);
+            setAllDevices([]);
         }
     };
 
@@ -485,6 +551,192 @@ export default function DashboardView() {
             setLoadingDeviceData(false);
         }
     };
+
+    const fetchDevicesByProvinceCode = async (provinceCode: string) => {
+        try {
+            const params = new URLSearchParams();
+            params.append("limit", "200");
+            params.append("offset", "0");
+            params.append("provinceCode", provinceCode);
+            if (username) params.append("username", username);
+
+            const res = await authenticatedFetch(`${API_URL}/api/devices?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                const deviceOptions = (data.data || []).map((d: DeviceListItem) => ({
+                    device_id: d.device_id,
+                    name: d.name || d.device_id,
+                }));
+                setAreaDevices(deviceOptions);
+                // Chọn tự động thiết bị đầu tiên để hiện cảm biến
+                const firstId = deviceOptions[0]?.device_id || "";
+                setSelectedAreaDeviceId(firstId);
+                if (!firstId) {
+                    setAreaDeviceSensorData([]);
+                    setAreaDeviceInfo(null);
+                }
+            } else {
+                setAreaDevices([]);
+                setSelectedAreaDeviceId("");
+                setAreaDeviceSensorData([]);
+                setAreaDeviceInfo(null);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách thiết bị theo khu vực:", error);
+            setAreaDevices([]);
+            setSelectedAreaDeviceId("");
+            setAreaDeviceSensorData([]);
+            setAreaDeviceInfo(null);
+        }
+    };
+
+    const fetchAreaDeviceSensorData = async (deviceId: string) => {
+        try {
+            setLoadingAreaDeviceData(true);
+            const params = new URLSearchParams();
+            params.append("device_id", deviceId);
+            params.append("hours", "24");
+            params.append("interval", "hour");
+            if (username) params.append("username", username);
+
+            const res = await authenticatedFetch(`${API_URL}/api/dashboard/sensor-stats-by-device?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setAreaDeviceSensorData(data.sensors || []);
+                setAreaDeviceInfo(data.device || null);
+            } else {
+                setAreaDeviceSensorData([]);
+                setAreaDeviceInfo(null);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy dữ liệu cảm biến thiết bị (popup khu vực):", error);
+            setAreaDeviceSensorData([]);
+            setAreaDeviceInfo(null);
+        } finally {
+            setLoadingAreaDeviceData(false);
+        }
+    };
+
+    const fetchAreaNodeSensorData = async () => {
+        try {
+            setLoadingAreaNodes(true);
+            const params = new URLSearchParams();
+            params.append("hours", "24");
+            params.append("interval", "hour");
+            if (selectedProvinceCode !== "all") params.append("province_code", selectedProvinceCode);
+            if (selectedAreaId !== "all") params.append("area_id", selectedAreaId);
+            if (username) params.append("username", username);
+
+            const res = await authenticatedFetch(`${API_URL}/api/dashboard/sensor-stats-by-area?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setAreaNodeData(data.nodes || []);
+                setCurrentNodeIndex(0);
+            } else {
+                setAreaNodeData([]);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy dữ liệu cảm biến theo khu vực:", error);
+            setAreaNodeData([]);
+        } finally {
+            setLoadingAreaNodes(false);
+        }
+    };
+
+    useEffect(() => {
+        if (areaDialogOpen && selectedArea?.province_code) {
+            fetchDevicesByProvinceCode(selectedArea.province_code);
+        } else {
+            setAreaDevices([]);
+            setSelectedAreaDeviceId("");
+            setAreaDeviceSensorData([]);
+            setAreaDeviceInfo(null);
+            setLoadingAreaDeviceData(false);
+        }
+    }, [areaDialogOpen, selectedArea?.province_code]);
+
+    useEffect(() => {
+        if (areaDialogOpen && selectedAreaDeviceId) {
+            fetchAreaDeviceSensorData(selectedAreaDeviceId);
+        } else {
+            setAreaDeviceSensorData([]);
+            setAreaDeviceInfo(null);
+        }
+    }, [areaDialogOpen, selectedAreaDeviceId]);
+
+    const provinceOptions = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const d of allDevices) {
+            if (d.province_code) {
+                map.set(d.province_code, d.province_name || d.province_code);
+            }
+        }
+        return Array.from(map.entries())
+            .map(([code, name]) => ({ code, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+    }, [allDevices]);
+
+    const fetchAreasByProvince = async (provinceCode: string) => {
+        try {
+            const params = new URLSearchParams();
+            if (provinceCode !== "all") params.append("provinceCode", provinceCode);
+            const res = await authenticatedFetch(`${API_URL}/api/areas/list-areas?${params.toString()}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && Array.isArray(data.data)) {
+                const options = data.data
+                    .map((a: { id: number; name: string | null }) => ({
+                        id: a.id,
+                        name: a.name || `Khu vực #${a.id}`,
+                    }))
+                    .sort((a: AreaOption, b: AreaOption) => a.name.localeCompare(b.name, "vi"));
+                setAreaOptions(options);
+            } else {
+                setAreaOptions([]);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách khu vực:", error);
+            setAreaOptions([]);
+        }
+    };
+
+    useEffect(() => {
+        if (selectedProvinceCode !== "all") {
+            const exists = provinceOptions.some((p) => p.code === selectedProvinceCode);
+            if (!exists) {
+                setSelectedProvinceCode("all");
+            }
+        }
+    }, [provinceOptions, selectedProvinceCode]);
+
+    useEffect(() => {
+        if (selectedAreaId !== "all") {
+            const areaIdNum = Number(selectedAreaId);
+            const exists = areaOptions.some((a) => a.id === areaIdNum);
+            if (!exists) {
+                setSelectedAreaId("all");
+            }
+        }
+    }, [areaOptions, selectedAreaId]);
+
+    useEffect(() => {
+        fetchAreasByProvince(selectedProvinceCode);
+        setSelectedAreaId("all");
+    }, [selectedProvinceCode]);
+
+    useEffect(() => {
+        if (!isAuthenticated || !isAdmin) return;
+        fetchAreaNodeSensorData();
+    }, [isAuthenticated, isAdmin, username, selectedProvinceCode, selectedAreaId]);
+
+    const currentNode = areaNodeData[currentNodeIndex] || null;
 
     if (!isAuthenticated || !isAdmin) {
         return (
@@ -600,21 +852,6 @@ export default function DashboardView() {
                     </CardContent>
                 </Card>
 
-                {/* Tổng cảnh báo */}
-                {/* <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Cảnh báo</CardTitle>
-                        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">
-                            {loadingAlertStats ? "..." : (alertStats?.total_count || stats.alerts.total || 0)}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            {alertStats?.active_count ? `${alertStats.active_count} đang bị lỗi` : "Tổng số cảnh báo hệ thống"}
-                        </p>
-                    </CardContent>
-                </Card> */}
             </div>
 
             <h2 className="text-gray-800 mb-4 flex items-center gap-2">
@@ -740,22 +977,6 @@ export default function DashboardView() {
                             </div>
                         </div>
 
-                        {/* <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <WifiOff className="h-4 w-4 text-gray-600" />
-                                    <span className="text-sm">Offline</span>
-                                </div>
-                                <span className="font-semibold">{stats.devices.offline}</span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div
-                                    className="bg-gray-600 h-2 rounded-full transition-all"
-                                    style={{ width: `${stats.devices.total > 0 ? (stats.devices.offline / stats.devices.total) * 100 : 0}%` }}
-                                />
-                            </div>
-                        </div> */}
-
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
@@ -876,136 +1097,107 @@ export default function DashboardView() {
                 </Card>
             </div>
 
-            {/* Số lượng mẫu cảm biến theo giờ (24h) */}
+            {/* Khu vực (dạng thẻ) */}
             <Card>
                 <CardHeader>
-                    <CardTitle>Số lượng mẫu cảm biến 24h qua</CardTitle>
-                    <CardDescription>Biểu đồ cột thể hiện số lượng mẫu dữ liệu được ghi nhận mỗi giờ</CardDescription>
+                    <CardTitle>Khu vực giám sát</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    {loadingSensor && (
-                        <div className="text-sm text-muted-foreground">Đang tải biểu đồ...</div>
+                    {(!stats.devices.byProvince || stats.devices.byProvince.length === 0) ? (
+                        <div className="text-sm text-muted-foreground">Chưa có khu vực.</div>
+                    ) : (
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            {stats.devices.byProvince.map((p) => (
+                                <button
+                                    key={p.province_code}
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedArea(p);
+                                        setAreaDialogOpen(true);
+                                    }}
+                                    className={cn(
+                                        "text-left rounded-xl border bg-white p-4 shadow-sm transition-all",
+                                        "hover:shadow-md hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/30 hover:cursor-pointer"
+                                    )}
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-semibold text-slate-900 truncate">
+                                                {p.province_name || "Không rõ"}
+                                            </p>
+                                            {/* <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                                Mã: {p.province_code}
+                                            </p> */}
+                                        </div>
+                                        <Badge variant="outline" className="bg-slate-50">
+                                            {p.count} thiết bị
+                                        </Badge>
+                                    </div>
+                                    {/* <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+                                        <MapPin className="size-4 text-blue-600" />
+                                        <span>Xem sơ đồ cảm biến</span>
+                                    </div> */}
+                                </button>
+                            ))}
+                        </div>
                     )}
-                    {!loadingSensor && sensorTypes.length === 0 && (
-                        <div className="text-sm text-muted-foreground">Chưa có dữ liệu lịch sử cảm biến.</div>
-                    )}
-                    {!loadingSensor && sensorTypes.length > 0 && (
-                        <div className="grid gap-6 lg:grid-cols-2">
-                            {sensorTypes.map((type) => {
-                                const series = sensorSeries[type] || [];
+                </CardContent>
+            </Card>
 
-                                // Format dữ liệu cho Recharts - gom theo giờ (kèm ngày) và lấy 24 giờ gần nhất
-                                const sortedSeries = [...series].sort(
-                                    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
-                                );
-                                const uniqueHours = new Map<number, number>();
-
-                                // Group theo mốc giờ (đã set phút/giây về 0) để tránh ghi đè giữa các ngày
-                                sortedSeries.forEach((p) => {
-                                    const date = new Date(p.time);
-                                    date.setMinutes(0, 0, 0);
-                                    const bucket = date.getTime();
-                                    uniqueHours.set(bucket, (uniqueHours.get(bucket) || 0) + p.count);
-                                });
-
-                                // Lấy 24 giờ gần nhất và format nhãn giờ + ngày
-                                const chartData = Array.from(uniqueHours.entries())
-                                    .sort((a, b) => a[0] - b[0])
-                                    .slice(-24)
-                                    .map(([bucket, count]) => {
-                                        const d = new Date(bucket);
-                                        const timeLabel = `${d
-                                            .toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`;
-                                        return {
-                                            time: timeLabel,
-                                            "Số mẫu": count,
-                                        };
-                                    });
-
-                                const totalSamples = series.reduce((sum, p) => sum + p.count, 0);
-                                const maxSamples = maxCountByType[type] || 0;
-
-                                const colorMap: Record<string, string> = {
-                                    rainfall_24h: "hsl(221.2 83.2% 53.3%)",
-                                    soil_moisture: "hsl(142.1 76.2% 36.3%)",
-                                    vibration_g: "hsl(0 84.2% 60.2%)",
-                                    tilt_deg: "hsl(262.1 83.3% 57.8%)",
-                                    slope_deg: "hsl(43.3 96.4% 56.3%)",
-                                };
-                                const barColor = colorMap[type] || "hsl(221.2 83.2% 53.3%)";
-
-                                const chartConfig = {
-                                    "Số mẫu": {
-                                        label: "Số mẫu",
-                                        color: barColor,
-                                    },
-                                };
+            {/* Top khu vực có nhiều cảnh báo nhất trong 30 ngày */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Top khu vực có nhiều cảnh báo (30 ngày)</CardTitle>
+                    <CardDescription>Dựa trên số cảnh báo ghi nhận theo tỉnh/thành trong 30 ngày gần nhất</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {!stats.alerts.topProvincesLast30Days || stats.alerts.topProvincesLast30Days.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">
+                            Chưa có cảnh báo nào trong 30 ngày gần đây.
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {stats.alerts.topProvincesLast30Days.map((item, index) => {
+                                const totalAlerts = stats.alerts.total || 0;
+                                const ratio =
+                                    totalAlerts > 0 ? Math.min(100, (item.count / totalAlerts) * 100) : 0;
 
                                 return (
-                                    <div key={type} className="space-y-3">
-                                        <div className="flex items-center gap-2">
-                                            {type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
-                                            {type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
-                                            {type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
-                                            {type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
-                                            {type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
-                                            <span className="text-base font-semibold text-slate-900">
-                                                {type === "vibration_g"
-                                                    ? "Cảm biến rung (g)"
-                                                    : type === "rainfall_24h"
-                                                        ? "Lượng mưa 24h (mm)"
-                                                        : type === "soil_moisture"
-                                                            ? "Độ ẩm đất (%)"
-                                                            : type === "tilt_deg"
-                                                                ? "Độ nghiêng (°)"
-                                                                : type === "slope_deg"
-                                                                    ? "Độ dốc (°)"
-                                                                    : type}
-                                            </span>
+                                    <div
+                                        key={item.province_code || index}
+                                        className="rounded-lg border p-3 flex flex-col gap-2 bg-slate-50"
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[11px] font-semibold text-blue-700">
+                                                    #{index + 1}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-semibold text-slate-900 truncate">
+                                                        {item.province_name || "Không rõ"}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <Badge variant="outline" className="bg-white">
+                                                {item.count} cảnh báo
+                                            </Badge>
                                         </div>
-                                        {series.length === 0 ? (
-                                            <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
-                                                Chưa có dữ liệu trong khoảng thời gian này
+                                        <div className="space-y-1">
+                                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                                <span>Tỷ lệ trong tổng cảnh báo</span>
+                                                <span className="font-semibold text-slate-900">
+                                                    {totalAlerts > 0
+                                                        ? `${((item.count / totalAlerts) * 100).toFixed(1)}%`
+                                                        : "—"}
+                                                </span>
                                             </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center justify-between text-xs text-slate-600">
-                                                        <span className="font-medium">Trục Y: Số lượng mẫu (mẫu/giờ)</span>
-                                                        <span className="text-muted-foreground">Trục X: Thời gian (giờ)</span>
-                                                    </div>
-                                                </div>
-                                                <ChartContainer config={chartConfig} className="h-64">
-                                                    <RechartsBarChart data={chartData}>
-                                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                                        <XAxis
-                                                            dataKey="time"
-                                                            tickLine={false}
-                                                            axisLine={false}
-                                                            tickMargin={8}
-                                                            className="text-xs"
-                                                        />
-                                                        <YAxis
-                                                            tickLine={false}
-                                                            axisLine={false}
-                                                            tickMargin={8}
-                                                            className="text-xs"
-                                                            label={{ value: "Số mẫu", angle: -90, position: "insideLeft" }}
-                                                        />
-                                                        <ChartTooltip content={<ChartTooltipContent />} />
-                                                        <Bar
-                                                            dataKey="Số mẫu"
-                                                            fill={barColor}
-                                                            radius={[4, 4, 0, 0]}
-                                                        />
-                                                    </RechartsBarChart>
-                                                </ChartContainer>
-                                                <div className="flex items-center justify-between text-xs text-slate-600 px-2">
-                                                    <span>Tổng: <span className="font-semibold text-slate-900">{totalSamples}</span> mẫu</span>
-                                                    <span>Max: <span className="font-semibold text-slate-900">{maxSamples}</span> mẫu/giờ</span>
-                                                </div>
+                                            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                                <div
+                                                    className="h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-blue-700"
+                                                    style={{ width: `${ratio}%` }}
+                                                />
                                             </div>
-                                        )}
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -1013,175 +1205,6 @@ export default function DashboardView() {
                     )}
                 </CardContent>
             </Card>
-
-            {/* Giá trị trung bình cảm biến theo giờ (24h) */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Giá trị trung bình cảm biến 24h qua</CardTitle>
-                    <CardDescription>Biểu đồ vùng thể hiện giá trị đo được trung bình mỗi giờ</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {loadingSensor && (
-                        <div className="text-sm text-muted-foreground">Đang tải biểu đồ...</div>
-                    )}
-                    {!loadingSensor && sensorTypes.length === 0 && (
-                        <div className="text-sm text-muted-foreground">Chưa có dữ liệu lịch sử cảm biến.</div>
-                    )}
-                    {!loadingSensor && sensorTypes.length > 0 && (
-                        <div className="grid gap-6 lg:grid-cols-2">
-                            {sensorTypes.map((type) => {
-                                const series = sensorSeries[type] || [];
-
-                                // Format dữ liệu cho Recharts - giá trị trung bình theo giờ (kèm ngày) và loại trùng lặp
-                                const sortedSeries = [...series]
-                                    .filter((p) => p.avg_value !== null)
-                                    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-
-                                const uniqueHours = new Map<number, { sum: number; count: number }>();
-
-                                // Group theo mốc giờ (đã set phút/giây về 0) để tránh ghi đè giữa các ngày
-                                sortedSeries.forEach((p) => {
-                                    const date = new Date(p.time);
-                                    date.setMinutes(0, 0, 0);
-                                    const bucket = date.getTime();
-                                    const existing = uniqueHours.get(bucket) || { sum: 0, count: 0 };
-                                    uniqueHours.set(bucket, {
-                                        sum: existing.sum + (p.avg_value || 0),
-                                        count: existing.count + 1,
-                                    });
-                                });
-
-                                // Lấy 24 giờ gần nhất và format nhãn giờ + ngày
-                                const chartData = Array.from(uniqueHours.entries())
-                                    .sort((a, b) => a[0] - b[0])
-                                    .slice(-24)
-                                    .map(([bucket, { sum, count }]) => {
-                                        const d = new Date(bucket);
-                                        const timeLabel = `${d
-                                            .toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`;
-                                        return {
-                                            time: timeLabel,
-                                            "Giá trị TB": Number((sum / count).toFixed(2)),
-                                        };
-                                    });
-
-                                const unitLabels: Record<string, string> = {
-                                    rainfall_24h: "mm",
-                                    soil_moisture: "%",
-                                    vibration_g: "g",
-                                    tilt_deg: "°",
-                                    slope_deg: "°",
-                                };
-                                const unit = unitLabels[type] || "";
-
-                                const colorMap: Record<string, string> = {
-                                    rainfall_24h: "hsl(221.2 83.2% 53.3%)",
-                                    soil_moisture: "hsl(142.1 76.2% 36.3%)",
-                                    vibration_g: "hsl(0 84.2% 60.2%)",
-                                    tilt_deg: "hsl(262.1 83.3% 57.8%)",
-                                    slope_deg: "hsl(43.3 96.4% 56.3%)",
-                                };
-                                const areaColor = colorMap[type] || "hsl(221.2 83.2% 53.3%)";
-
-                                const chartConfig = {
-                                    "Giá trị TB": {
-                                        label: `Giá trị TB (${unit})`,
-                                        color: areaColor,
-                                    },
-                                };
-
-                                return (
-                                    <div key={type} className="space-y-3">
-                                        <div className="flex items-center gap-2">
-                                            {type === "rainfall" && <CloudRain className="h-5 w-5 text-blue-600" />}
-                                            {type === "humidity" && <Droplets className="h-5 w-5 text-emerald-600" />}
-                                            {type === "vibration" && <Activity className="h-5 w-5 text-red-600" />}
-                                            {type === "position" && <Cpu className="h-5 w-5 text-indigo-600" />}
-                                            {type === "slope" && <Gauge className="h-5 w-5 text-amber-600" />}
-                                            <span className="text-base font-semibold text-slate-900">
-                                                {type === "vibration"
-                                                    ? "Cảm biến rung"
-                                                    : type === "rainfall"
-                                                        ? "Lượng mưa"
-                                                        : type === "humidity"
-                                                            ? "Độ ẩm"
-                                                            : type === "position"
-                                                                ? "Vị trí"
-                                                                : type === "slope"
-                                                                    ? "Độ dốc"
-                                                                    : type}
-                                            </span>
-                                            <span className="text-xs text-muted-foreground">({unit})</span>
-                                        </div>
-                                        {chartData.length === 0 ? (
-                                            <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
-                                                Chưa có giá trị trung bình trong khoảng thời gian này
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center justify-between text-xs text-slate-600">
-                                                        <span className="font-medium">Trục Y: Giá trị đo được ({unit})</span>
-                                                        <span className="text-muted-foreground">Trục X: Thời gian (giờ)</span>
-                                                    </div>
-                                                </div>
-                                                <ChartContainer config={chartConfig} className="h-64">
-                                                    <RechartsAreaChart data={chartData}>
-                                                        <defs>
-                                                            <linearGradient id={`gradient-${type}`} x1="0" y1="0" x2="0" y2="1">
-                                                                <stop offset="5%" stopColor={areaColor} stopOpacity={0.8} />
-                                                                <stop offset="95%" stopColor={areaColor} stopOpacity={0.1} />
-                                                            </linearGradient>
-                                                        </defs>
-                                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                                        <XAxis
-                                                            dataKey="time"
-                                                            tickLine={false}
-                                                            axisLine={false}
-                                                            tickMargin={8}
-                                                            className="text-xs"
-                                                        />
-                                                        <YAxis
-                                                            tickLine={false}
-                                                            axisLine={false}
-                                                            tickMargin={8}
-                                                            className="text-xs"
-                                                            label={{ value: `Giá trị (${unit})`, angle: -90, position: "insideLeft" }}
-                                                        />
-                                                        <ChartTooltip
-                                                            content={<ChartTooltipContent formatter={(value) => `${Number(value).toFixed(2)} ${unit}`} />}
-                                                        />
-                                                        <Area
-                                                            type="monotone"
-                                                            dataKey="Giá trị TB"
-                                                            stroke={areaColor}
-                                                            fill={`url(#gradient-${type})`}
-                                                            strokeWidth={2}
-                                                        />
-                                                    </RechartsAreaChart>
-                                                </ChartContainer>
-                                                <div className="flex items-center justify-between text-xs text-slate-600 px-2">
-                                                    <span>
-                                                        Giá trị TB: <span className="font-semibold text-slate-900">
-                                                            {(chartData.reduce((sum, d) => sum + (d["Giá trị TB"] || 0), 0) / chartData.length).toFixed(2)} {unit}
-                                                        </span>
-                                                    </span>
-                                                    <span>
-                                                        Max: <span className="font-semibold text-slate-900">
-                                                            {Math.max(...chartData.map(d => d["Giá trị TB"] || 0)).toFixed(2)} {unit}
-                                                        </span>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-
             {/* Top thiết bị gửi dữ liệu trong 24h */}
             <Card>
                 <CardHeader>
@@ -1209,290 +1232,172 @@ export default function DashboardView() {
                 </CardContent>
             </Card>
 
-            {/* Chi tiết dữ liệu theo thiết bị */}
-            <Card>
+            {/* Chi tiết dữ liệu theo khu vực / node */}
+            <Card ref={deviceDetailRef}>
                 <CardHeader>
-                    <CardTitle>Chi tiết dữ liệu theo thiết bị</CardTitle>
-                    <CardDescription>Xem dữ liệu cảm biến của từng thiết bị cụ thể</CardDescription>
+                    <CardTitle>Chi tiết dữ liệu cảm biến theo khu vực</CardTitle>
+                    <CardDescription>Chọn tỉnh và khu vực, sau đó duyệt từng Node để xem 4 biểu đồ cảm biến</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    <div className="flex items-center gap-4">
-                        <Label htmlFor="device-select" className="text-sm font-medium min-w-[120px]">
-                            Chọn thiết bị:
-                        </Label>
-                        <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId}>
-                            <SelectTrigger id="device-select" className="w-full max-w-md">
-                                <SelectValue placeholder="Chọn thiết bị để xem chi tiết" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {devices.length === 0 ? (
-                                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                                        Không có thiết bị
-                                    </div>
-                                ) : (
-                                    devices.map((device) => (
-                                        <SelectItem key={device.device_id} value={device.device_id}>
-                                            {device.name} ({device.device_id})
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label className="text-sm font-medium">Tỉnh / Thành</Label>
+                            <Select value={selectedProvinceCode} onValueChange={setSelectedProvinceCode}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Chọn tỉnh thành" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Tất cả tỉnh thành</SelectItem>
+                                    {provinceOptions.map((p) => (
+                                        <SelectItem key={p.code} value={p.code}>
+                                            {p.name} ({p.code})
                                         </SelectItem>
-                                    ))
-                                )}
-                            </SelectContent>
-                        </Select>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="text-sm font-medium">Khu vực theo dõi</Label>
+                            <Select value={selectedAreaId} onValueChange={setSelectedAreaId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Chọn khu vực" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Tất cả khu vực</SelectItem>
+                                    {areaOptions.map((a) => (
+                                        <SelectItem key={a.id} value={String(a.id)}>
+                                            {a.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
-                    {selectedDeviceId && deviceInfo && (
-                        <div className="rounded-lg border bg-slate-50 p-4">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <h3 className="text-lg font-semibold">{deviceInfo.name}</h3>
-                                    <p className="text-sm text-muted-foreground">ID: {deviceInfo.device_id}</p>
-                                    {deviceInfo.province_name && (
-                                        <p className="text-sm text-muted-foreground">Tỉnh thành: {deviceInfo.province_name}</p>
-                                    )}
-                                </div>
-                                <div className="text-right">
-                                    <Badge
-                                        className={
-                                            deviceInfo.status === "online"
-                                                ? "bg-green-100 text-green-800"
-                                                : deviceInfo.status === "offline"
-                                                    ? "bg-gray-100 text-gray-700"
-                                                    : deviceInfo.status === "disconnected"
-                                                        ? "bg-red-100 text-red-800"
-                                                        : "bg-blue-100 text-blue-800"
-                                        }
-                                    >
-                                        {deviceInfo.status === "online"
-                                            ? "Đang hoạt động"
-                                            : deviceInfo.status === "offline"
-                                                ? "Offline"
-                                                : deviceInfo.status === "disconnected"
-                                                    ? "Mất kết nối"
-                                                    : "Bảo trì"}
-                                    </Badge>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        Cập nhật: {new Date(deviceInfo.last_seen).toLocaleString("vi-VN")}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {loadingDeviceData && (
+                    {loadingAreaNodes && (
                         <div className="text-center py-8">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                            <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+                            <p className="text-sm text-muted-foreground">Đang tải dữ liệu theo khu vực...</p>
                         </div>
                     )}
 
-                    {!loadingDeviceData && selectedDeviceId && deviceSensorData.length === 0 && (
+                    {!loadingAreaNodes && areaNodeData.length === 0 && (
                         <div className="text-center py-8 border rounded-lg">
-                            <p className="text-sm text-muted-foreground">Chưa có dữ liệu cảm biến trong 24h qua</p>
+                            <p className="text-sm text-muted-foreground">Không có dữ liệu node trong khu vực đã chọn</p>
                         </div>
                     )}
 
-                    {!loadingDeviceData && deviceSensorData.length > 0 && (
-                        <div className="grid gap-6 lg:grid-cols-2">
-                            {deviceSensorData.map((sensor) => {
-                                const sortedData = [...sensor.data].sort(
-                                    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
-                                );
+                    {!loadingAreaNodes && currentNode && (
+                        <>
+                            <div className="rounded-lg border bg-slate-50 p-4">
+                                <div className="flex items-center justify-between gap-4">
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => setCurrentNodeIndex((prev) => (prev - 1 + areaNodeData.length) % areaNodeData.length)}
+                                        disabled={areaNodeData.length <= 1}
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                    </Button>
+                                    <div className="text-center min-w-0 flex-1">
+                                        <p className="text-lg font-semibold truncate">
+                                            Node {currentNode.node_id} - {currentNode.device_name}
+                                        </p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {currentNode.province_name} / {currentNode.area_name}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            {currentNodeIndex + 1} / {areaNodeData.length} node
+                                        </p>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => setCurrentNodeIndex((prev) => (prev + 1) % areaNodeData.length)}
+                                        disabled={areaNodeData.length <= 1}
+                                    >
+                                        <ChevronRight className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
 
-                                // Format dữ liệu cho chart
-                                const chartData = sortedData.slice(-24).map((d) => {
-                                    const date = new Date(d.time);
-                                    const timeLabel = `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`;
-                                    return {
-                                        time: timeLabel,
-                                        "Giá trị TB": d.avg_value || 0,
-                                        "Min": d.min_value || 0,
-                                        "Max": d.max_value || 0,
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                                {currentNode.sensors.map((sensor) => {
+                                    const sortedData = [...sensor.data].sort(
+                                        (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+                                    );
+                                    const chartData = sortedData.slice(-24).map((d) => {
+                                        const date = new Date(d.time);
+                                        return {
+                                            time: `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`,
+                                            "Giá trị TB": d.avg_value || 0,
+                                            Min: d.min_value || 0,
+                                            Max: d.max_value || 0,
+                                        };
+                                    });
+
+                                    const unitMap: Record<string, string> = {
+                                        rainfall_24h: "mm",
+                                        soil_moisture: "%",
+                                        vibration_g: "g",
+                                        tilt_deg: "°",
+                                        slope_deg: "°",
                                     };
-                                });
+                                    const unit = unitMap[sensor.sensor_type] || "";
+                                    const colorMap: Record<string, string> = {
+                                        rainfall_24h: "hsl(221.2 83.2% 53.3%)",
+                                        soil_moisture: "hsl(142.1 76.2% 36.3%)",
+                                        vibration_g: "hsl(0 84.2% 60.2%)",
+                                        tilt_deg: "hsl(262.1 83.3% 57.8%)",
+                                        slope_deg: "hsl(43.3 96.4% 56.3%)",
+                                    };
+                                    const lineColor = colorMap[sensor.sensor_type] || "hsl(221.2 83.2% 53.3%)";
+                                    const chartConfig = {
+                                        "Giá trị TB": { label: "Giá trị TB", color: lineColor },
+                                        Min: { label: "Min", color: "hsl(0 0% 70%)" },
+                                        Max: { label: "Max", color: "hsl(0 0% 70%)" },
+                                    };
 
-                                const unitMap: Record<string, string> = {
-                                    rainfall_24h: "mm",
-                                    soil_moisture: "%",
-                                    vibration_g: "g",
-                                    tilt_deg: "°",
-                                    slope_deg: "°",
-                                };
-                                const unit = unitMap[sensor.sensor_type] || "";
-
-                                const colorMap: Record<string, string> = {
-                                    rainfall_24h: "hsl(221.2 83.2% 53.3%)",
-                                    soil_moisture: "hsl(142.1 76.2% 36.3%)",
-                                    vibration_g: "hsl(0 84.2% 60.2%)",
-                                    tilt_deg: "hsl(262.1 83.3% 57.8%)",
-                                    slope_deg: "hsl(43.3 96.4% 56.3%)",
-                                };
-                                const lineColor = colorMap[sensor.sensor_type] || "hsl(221.2 83.2% 53.3%)";
-
-                                const chartConfig = {
-                                    "Giá trị TB": {
-                                        label: "Giá trị TB",
-                                        color: lineColor,
-                                    },
-                                    "Min": {
-                                        label: "Min",
-                                        color: "hsl(0 0% 70%)",
-                                    },
-                                    "Max": {
-                                        label: "Max",
-                                        color: "hsl(0 0% 70%)",
-                                    },
-                                };
-
-                                return (
-                                    <div key={`${sensor.sensor_code}_${sensor.sensor_type}`} className="space-y-3">
-                                        <div className="flex items-center gap-2">
-                                            {sensor.sensor_type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
-                                            {sensor.sensor_type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
-                                            {sensor.sensor_type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
-                                            {sensor.sensor_type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
-                                            {sensor.sensor_type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
-                                            <div>
-                                                <span className="text-base font-semibold text-slate-900">{sensor.sensor_name}</span>
-                                                <span className="text-xs text-muted-foreground ml-2">({sensor.sensor_code})</span>
-                                            </div>
-                                        </div>
-                                        {chartData.length === 0 ? (
-                                            <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
-                                                Chưa có dữ liệu trong khoảng thời gian này
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                <ChartContainer config={chartConfig} className="h-64">
-                                                    <LineChart data={chartData}>
-                                                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                                        <XAxis
-                                                            dataKey="time"
-                                                            tickLine={false}
-                                                            axisLine={false}
-                                                            tickMargin={8}
-                                                            className="text-xs"
-                                                        />
-                                                        <YAxis
-                                                            tickLine={false}
-                                                            axisLine={false}
-                                                            tickMargin={8}
-                                                            className="text-xs"
-                                                            label={{ value: `Giá trị (${unit})`, angle: -90, position: "insideLeft" }}
-                                                        />
-                                                        <ChartTooltip
-                                                            content={<ChartTooltipContent formatter={(value) => `${Number(value).toFixed(2)} ${unit}`} />}
-                                                        />
-                                                        <Line
-                                                            type="monotone"
-                                                            dataKey="Giá trị TB"
-                                                            stroke={lineColor}
-                                                            strokeWidth={2}
-                                                            dot={false}
-                                                        />
-                                                    </LineChart>
-                                                </ChartContainer>
-                                                <div className="flex items-center justify-between text-xs text-slate-600 px-2">
-                                                    <span>
-                                                        TB: <span className="font-semibold text-slate-900">
-                                                            {(chartData.reduce((sum, d) => sum + (d["Giá trị TB"] || 0), 0) / chartData.length).toFixed(2)} {unit}
-                                                        </span>
-                                                    </span>
-                                                    <span>
-                                                        Min: <span className="font-semibold text-slate-900">
-                                                            {Math.min(...chartData.map(d => d["Min"] || 0)).toFixed(2)} {unit}
-                                                        </span>
-                                                    </span>
-                                                    <span>
-                                                        Max: <span className="font-semibold text-slate-900">
-                                                            {Math.max(...chartData.map(d => d["Max"] || 0)).toFixed(2)} {unit}
-                                                        </span>
-                                                    </span>
+                                    return (
+                                        <div key={`${currentNode.node_key}_${sensor.sensor_code}_${sensor.sensor_type}`} className="space-y-3 rounded-lg border p-3">
+                                            <div className="flex items-center gap-2">
+                                                {sensor.sensor_type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
+                                                {sensor.sensor_type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
+                                                {sensor.sensor_type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
+                                                {sensor.sensor_type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
+                                                {sensor.sensor_type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
+                                                <div>
+                                                    <span className="text-base font-semibold text-slate-900">{sensor.sensor_name}</span>
+                                                    <span className="text-xs text-muted-foreground ml-2">({sensor.sensor_code})</span>
                                                 </div>
                                             </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                            {chartData.length === 0 ? (
+                                                <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
+                                                    Chưa có dữ liệu trong 24h
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    <ChartContainer config={chartConfig} className="h-72 w-full">
+                                                        <LineChart data={chartData}>
+                                                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                                                            <XAxis dataKey="time" tickLine={false} axisLine={false} tickMargin={8} className="text-xs" />
+                                                            <YAxis tickLine={false} axisLine={false} tickMargin={8} className="text-xs" />
+                                                            <ChartTooltip
+                                                                content={<ChartTooltipContent formatter={(value) => `${Number(value).toFixed(2)} ${unit}`} />}
+                                                            />
+                                                            <Line type="monotone" dataKey="Giá trị TB" stroke={lineColor} strokeWidth={2} dot={false} />
+                                                        </LineChart>
+                                                    </ChartContainer>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
                     )}
                 </CardContent>
             </Card>
-
-            {/* Mức độ nguy hiểm sự kiện */}
-            {/* <Card>
-                <CardHeader>
-                    <CardTitle>Mức độ nguy hiểm sự kiện</CardTitle>
-                    <CardDescription>Phân bổ theo mức độ nghiêm trọng</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-4 md:grid-cols-5">
-                        {[1, 2, 3, 4, 5].map((level) => {
-                            const count = stats.events.severity[level as keyof typeof stats.events.severity];
-                            const colors = {
-                                1: "bg-green-100 text-green-800 border-green-300",
-                                2: "bg-blue-100 text-blue-800 border-blue-300",
-                                3: "bg-yellow-100 text-yellow-800 border-yellow-300",
-                                4: "bg-orange-100 text-orange-800 border-orange-300",
-                                5: "bg-red-100 text-red-800 border-red-300",
-                            };
-                            const labels = {
-                                1: "Rất thấp",
-                                2: "Thấp",
-                                3: "Trung bình",
-                                4: "Cao",
-                                5: "Rất cao",
-                            };
-                            return (
-                                <div
-                                    key={level}
-                                    className={cn(
-                                        "rounded-lg border p-4 text-center",
-                                        colors[level as keyof typeof colors]
-                                    )}
-                                >
-                                    <div className="text-2xl font-bold">{count}</div>
-                                    <div className="text-xs mt-1">Mức {level}</div>
-                                    <div className="text-xs mt-1 opacity-75">{labels[level as keyof typeof labels]}</div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </CardContent>
-            </Card> */}
-
-            {/* Sự kiện 7 ngày gần nhất */}
-            {stats.events.last7Days.length > 0 && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Sự kiện 7 ngày gần nhất</CardTitle>
-                        <CardDescription>Xu hướng sự kiện theo thời gian</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex items-end gap-2 h-48">
-                            {stats.events.last7Days.map((item, index) => {
-                                const maxCount = Math.max(...stats.events.last7Days.map(d => d.count), 1);
-                                const height = (item.count / maxCount) * 100;
-                                const date = new Date(item.date);
-                                return (
-                                    <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                                        <div className="w-full flex items-end justify-center" style={{ height: '180px' }}>
-                                            <div
-                                                className="w-full bg-blue-600 rounded-t transition-all hover:bg-blue-700"
-                                                style={{ height: `${height}%` }}
-                                                title={`${item.count} sự kiện`}
-                                            />
-                                        </div>
-                                        <div className="text-xs text-muted-foreground text-center">
-                                            {date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
-                                        </div>
-                                        <div className="text-sm font-semibold">{item.count}</div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
 
             {/* Quick Actions */}
             <Card>
@@ -1507,7 +1412,7 @@ export default function DashboardView() {
                             <span>Quản lý thiết bị</span>
                         </Button>
                         {isSuperAdmin && (
-                        <Button variant="outline" onClick={() => router.push('/account')} className="h-auto flex-col py-4">
+                            <Button variant="outline" onClick={() => router.push('/account')} className="h-auto flex-col py-4">
                                 <User className="h-5 w-5 mb-2" />
                                 <span>Quản lý tài khoản</span>
                             </Button>
@@ -1527,6 +1432,200 @@ export default function DashboardView() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Popup sơ đồ khu vực */}
+            <Dialog open={areaDialogOpen} onOpenChange={setAreaDialogOpen}>
+                <DialogContent className="max-w-5xl">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {selectedArea?.province_name ? `Khu vực: ${selectedArea.province_name}` : "Chi tiết khu vực"}
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center gap-2 text-sm text-slate-700">
+                                <span className="font-semibold">
+                                    {selectedArea?.count !== undefined ? `${selectedArea.count} thiết bị` : ""}
+                                </span>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                                <Label htmlFor="area-device-select" className="text-sm font-medium">
+                                    Thiết bị:
+                                </Label>
+                                <Select value={selectedAreaDeviceId} onValueChange={setSelectedAreaDeviceId}>
+                                    <SelectTrigger id="area-device-select" className="w-full sm:w-[380px]">
+                                        <SelectValue placeholder="Chọn thiết bị trong khu vực" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {areaDevices.length === 0 ? (
+                                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                                Không có thiết bị
+                                            </div>
+                                        ) : (
+                                            areaDevices.map((d) => (
+                                                <SelectItem key={d.device_id} value={d.device_id}>
+                                                    {d.name} ({d.device_id})
+                                                </SelectItem>
+                                            ))
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        {loadingAreaDeviceData && (
+                            <div className="text-center py-10">
+                                <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                                <p className="text-sm text-muted-foreground">Đang tải dữ liệu cảm biến...</p>
+                            </div>
+                        )}
+
+                        {!loadingAreaDeviceData && !selectedAreaDeviceId && (
+                            <div className="rounded-lg border p-6 text-sm text-muted-foreground">
+                                Khu vực này chưa có thiết bị để hiển thị cảm biến.
+                            </div>
+                        )}
+
+                        {!loadingAreaDeviceData && selectedAreaDeviceId && (
+                            <div className="grid gap-4 lg:grid-cols-3">
+                                {/* Sơ đồ (trái) */}
+                                <div className="lg:col-span-2 rounded-xl border bg-slate-50 p-4">
+                                    <div className="flex items-center justify-between">
+                                        <div className="space-y-0.5">
+                                            <p className="text-sm font-semibold text-slate-900">Sơ đồ cảm biến</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {areaDeviceInfo?.name ? `Thiết bị: ${areaDeviceInfo.name}` : `Thiết bị: ${selectedAreaDeviceId}`}
+                                            </p>
+                                        </div>
+                                        {areaDeviceInfo?.status && (
+                                            <Badge variant="outline"
+                                                className={
+                                                    areaDeviceInfo.status === "online"
+                                                        ? "bg-green-100 text-green-800"
+                                                        : areaDeviceInfo.status === "offline"
+                                                            ? "bg-gray-100 text-gray-700"
+                                                            : areaDeviceInfo.status === "disconnected"
+                                                                ? "bg-red-100 text-red-800"
+                                                                : "bg-blue-100 text-blue-800"
+                                                }
+                                            >
+                                                {areaDeviceInfo.status === "online"
+                                                    ? "Đang hoạt động"
+                                                    : areaDeviceInfo.status === "offline"
+                                                        ? "Offline"
+                                                        : areaDeviceInfo.status === "disconnected"
+                                                            ? "Mất kết nối"
+                                                            : "Bảo trì"}
+                                            </Badge>
+                                        )}
+                                    </div>
+
+                                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                        {(areaDeviceSensorData || []).slice(0, 5).map((sensor) => {
+                                            const last = [...(sensor.data || [])]
+                                                .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+                                                .slice(-1)[0];
+
+                                            const unitMap: Record<string, string> = {
+                                                rainfall_24h: "mm",
+                                                soil_moisture: "%",
+                                                vibration_g: "g",
+                                                tilt_deg: "°",
+                                                slope_deg: "°",
+                                            };
+                                            const unit = unitMap[sensor.sensor_type] || "";
+                                            const value = last?.avg_value ?? null;
+                                            const timeText = last?.time ? new Date(last.time).toLocaleString("vi-VN") : "—";
+
+                                            const SensorIcon =
+                                                sensor.sensor_type === "rainfall_24h"
+                                                    ? CloudRain
+                                                    : sensor.sensor_type === "soil_moisture"
+                                                        ? Droplets
+                                                        : sensor.sensor_type === "vibration_g"
+                                                            ? Activity
+                                                            : sensor.sensor_type === "tilt_deg"
+                                                                ? Cpu
+                                                                : sensor.sensor_type === "slope_deg"
+                                                                    ? Gauge
+                                                                    : Radio;
+
+                                            return (
+                                                <div
+                                                    key={`${sensor.sensor_code}_${sensor.sensor_type}`}
+                                                    className="rounded-xl border bg-white p-3 shadow-sm"
+                                                >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-semibold text-slate-900 truncate">{sensor.sensor_name}</p>
+                                                            <p className="text-xs text-muted-foreground truncate">
+                                                                {sensor.sensor_code} • {sensor.sensor_type}
+                                                            </p>
+                                                        </div>
+                                                        <div className="rounded-md bg-slate-50 p-2">
+                                                            <SensorIcon className="size-4 text-blue-700" />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="mt-3 flex items-end justify-between">
+                                                        <div>
+                                                            <p className="text-xs text-muted-foreground">Giá trị gần nhất</p>
+                                                            <p className="text-lg font-bold text-slate-900">
+                                                                {value === null ? "—" : `${Number(value).toFixed(2)} ${unit}`}
+                                                            </p>
+                                                        </div>
+                                                        <Badge variant="outline" className="bg-slate-50">
+                                                            24h
+                                                        </Badge>
+                                                    </div>
+                                                    <p className="mt-2 text-[11px] text-muted-foreground">
+                                                        Cập nhật: {timeText}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {areaDeviceSensorData.length === 0 && (
+                                            <div className="sm:col-span-2 lg:col-span-3 rounded-lg border bg-white p-6 text-sm text-muted-foreground">
+                                                Chưa có dữ liệu cảm biến trong 24h qua.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Cột phải: ghi chú/nhanh */}
+                                <div className="rounded-xl border bg-white p-4 space-y-3">
+                                    {areaDeviceInfo?.last_seen && (
+                                        <div className="rounded-lg bg-slate-100 p-3 text-xs text-slate-700">
+                                            <p className="font-medium">Thiết bị cập nhật gần nhất</p>
+                                            <p className="text-muted-foreground mt-1">
+                                                {new Date(areaDeviceInfo.last_seen).toLocaleString("vi-VN")}
+                                            </p>
+                                        </div>
+                                    )}
+                                    <Button
+                                        className="w-full mt-2"
+                                        onClick={() => {
+                                            if (selectedAreaDeviceId) {
+                                                setSelectedDeviceId(selectedAreaDeviceId);
+                                                setAreaDialogOpen(false);
+                                                setTimeout(() => {
+                                                    deviceDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                                }, 0);
+                                            }
+                                        }}
+                                        disabled={!selectedAreaDeviceId}
+                                    >
+                                        Xem biểu đồ chi tiết thiết bị
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

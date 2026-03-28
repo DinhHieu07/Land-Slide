@@ -1,11 +1,11 @@
-# 🌍 LandSlide - Hệ Thống Giám Sát Sạt Lở Đất
+# LandSlide - Hệ Thống Giám Sát Sạt Lở Đất
 
 [![GitHub](https://img.shields.io/badge/GitHub-DinhHieu07/Land--Slide-blue)](https://github.com/DinhHieu07/Land-Slide)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-green)](https://land-slide.vercel.app/)
 
 > Hệ thống giám sát sạt lở đất thời gian thực sử dụng IoT, bản đồ số và dashboard web để theo dõi và cảnh báo sớm các nguy cơ sạt lở đất.
 
-## 📋 Mục Lục
+## Mục Lục
 
 - [Giới Thiệu](#-giới-thiệu)
 - [Tính Năng](#-tính-năng)
@@ -18,7 +18,7 @@
 - [Đóng Góp](#-đóng-góp)
 - [License](#-license)
 
-## 🎯 Giới Thiệu
+## Giới Thiệu
 
 **LandSlide** là hệ thống giám sát sạt lở đất thời gian thực, được thiết kế để hỗ trợ các nhóm kỹ thuật đánh giá và theo dõi nguy cơ sạt lở đất. Hệ thống kết nối với các cảm biến IoT qua MQTT, hiển thị dữ liệu real-time trên dashboard và bản đồ, tự động phát cảnh báo khi phát hiện nguy cơ.
 
@@ -28,45 +28,45 @@
 - Khu vực có nguy cơ sạt lở cao
 - Hỗ trợ ra quyết định sớm, giảm thiểu thiệt hại cho cộng đồng
 
-## ✨ Tính Năng
+## Tính Năng
 
-### 🔴 Quan Trắc Thời Gian Thực
+### Quan Trắc Thời Gian Thực
 - Nhận dữ liệu từ cảm biến qua **MQTT/REST API**
 - Hiển thị dashboard và bản đồ **ngay lập tức** không cần refresh
 - Cập nhật dữ liệu real-time qua **WebSocket**
 
-### 🗺️ Bản Đồ Nguy Cơ
+### Bản Đồ Nguy Cơ
 - Hiển thị vị trí thiết bị trên bản đồ tương tác
 - Lớp bản đồ cảnh báo, khu vực nguy hiểm
 - Hỗ trợ zoom tới điểm chi tiết
 - Xem thông tin thiết bị trực tiếp trên bản đồ
 
-### 🚨 Cảnh Báo Đa Kênh
+### Cảnh Báo Đa Kênh
 - Tự động phát hiện và tạo cảnh báo khi vượt ngưỡng
 - Phân loại mức độ: **Critical**, **Warning**, **Info**
 - Gửi cảnh báo qua **WebSocket**, **Email**
 - Quản lý trạng thái: Active → Acknowledged → Resolved
 
-### 📊 Dashboard & Thống Kê
+### Dashboard & Thống Kê
 - Tổng quan thiết bị: Online, Offline, Disconnected, Maintenance
 - Biểu đồ cảm biến 24h: Số lượng mẫu, Giá trị trung bình
 - Thống kê cảnh báo theo mức độ
 - Phân bổ thiết bị theo tỉnh/thành
 - Top thiết bị gửi dữ liệu nhiều nhất
 
-### 🔐 Phân Quyền & Bảo Mật
+### Phân Quyền & Bảo Mật
 - Hệ thống phân quyền: **Super Admin**, **Admin**
 - Quản lý tài khoản và phân quyền theo tỉnh/thành
 - JWT authentication
 - Ghi nhận lịch sử hoạt động
 
-### 📱 Quản Lý Thiết Bị
+### Quản Lý Thiết Bị
 - CRUD thiết bị và cảm biến
 - Theo dõi trạng thái kết nối
 - Tự động phát hiện thiết bị disconnected
 - Xem chi tiết dữ liệu theo từng thiết bị
 
-## 🛠️ Công Nghệ Sử Dụng
+## Công Nghệ Sử Dụng
 
 ### Backend
 - **Node.js** + **Express** - RESTful API server
@@ -93,7 +93,7 @@
 - **PostgreSQL** - Database hosting
 - **MQTT Broker** - IoT message broker
 
-## 📦 Cài Đặt
+## Cài Đặt
 
 ### Yêu Cầu
 - Node.js >= 18.x
@@ -121,7 +121,7 @@ cd frontend
 npm install
 ```
 
-## ⚙️ Cấu Hình
+## Cấu Hình
 
 ### Backend Environment Variables
 
@@ -170,7 +170,7 @@ Tạo file `.env` trong thư mục `frontend/`:
 NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
 
-## 🚀 Sử Dụng
+## Sử Dụng
 
 ### Chạy Backend
 
@@ -202,7 +202,7 @@ Frontend sẽ chạy tại: `http://localhost:3000`
    - **Cảnh báo**: Quản lý và xử lý cảnh báo
    - **Lịch sử**: Xem lịch sử dữ liệu và sự kiện
 
-## 📚 API Documentation
+## API Documentation
 
 ### Authentication
 ```
@@ -259,7 +259,7 @@ PUT    /api/accounts/:id         - Cập nhật tài khoản
 DELETE /api/accounts/:id         - Xóa tài khoản
 ```
 
-## 📁 Cấu Trúc Dự Án
+## Cấu Trúc Dự Án
 
 ```
 Land-Slide/
@@ -288,7 +288,7 @@ Land-Slide/
 └── README.md
 ```
 
-## 🔌 MQTT Data Format
+## MQTT Data Format
 
 Hệ thống nhận dữ liệu từ MQTT với format:
 
@@ -309,12 +309,12 @@ Hệ thống nhận dữ liệu từ MQTT với format:
 }
 ```
 
-## 🔗 Links
+## Links
 
 - **GitHub Repository**: [https://github.com/DinhHieu07/Land-Slide](https://github.com/DinhHieu07/Land-Slide)
 - **Live Demo**: [https://land-slide.vercel.app/](https://land-slide.vercel.app/)
 
-## 👤 Tác Giả
+## Tác Giả
 
 **DinhHieu07**
 
@@ -322,4 +322,4 @@ Hệ thống nhận dữ liệu từ MQTT với format:
 
 ---
 
-⭐ Nếu dự án này hữu ích, hãy cho một star!
+Nếu dự án này hữu ích, hãy cho một star!

@@ -13,7 +13,9 @@ const {
     getAccountProvinces,
     updateAccountProvinces,
     addAccountProvince,
-    removeAccountProvince
+    removeAccountProvince,
+    listPendingProvinceRequests,
+    approveProvinceRequest,
 } = require('../controllers/accountController');
 
 // Tất cả routes đều yêu cầu superAdmin
@@ -24,6 +26,8 @@ router.put('/:id', authenticateToken, roleMiddleware(['superAdmin']), updateAcco
 router.delete('/:id', authenticateToken, roleMiddleware(['superAdmin']), deleteAccount);
 router.post('/:id/reset-password', authenticateToken, roleMiddleware(['superAdmin']), resetPassword);
 router.post('/:id/change-role', authenticateToken, roleMiddleware(['superAdmin']), changeRole);
+router.get('/province-requests/pending', authenticateToken, roleMiddleware(['admin', 'superAdmin']), listPendingProvinceRequests);
+router.post('/:userId/province-requests/approve', authenticateToken, roleMiddleware(['admin', 'superAdmin']), approveProvinceRequest);
 
 // Routes quản lý tỉnh thành của account
 router.get('/:id/provinces', authenticateToken, roleMiddleware(['superAdmin']), getAccountProvinces);

@@ -60,15 +60,14 @@ type SensorDataHistory = {
 };
 
 const dataLabels: Record<string, { label: string; unit: string }> = {
-    slope_deg: { label: "Độ dốc", unit: "°" },
-    vibration_g: { label: "Cảm biến rung", unit: "g" },
-    rainfall_24h: { label: "Lượng mưa 24h", unit: "mm" },
+    vibration: { label: "Cảm biến rung", unit: "lần trong 2s" },
+    rainfall: { label: "Lượng mưa 24h", unit: "%" },
     soil_moisture: { label: "Độ ẩm đất", unit: "%" },
-    tilt_deg: { label: "Độ nghiêng", unit: "°" },
+    tilt: { label: "Độ nghiêng", unit: "°" },
 };
 
 export default function HistoryView() {
-    const { isAuthenticated, isAdmin, loading } = useAuth();
+    const { isAuthenticated, isAdmin, isSuperAdmin, loading } = useAuth();
     const [activeTab, setActiveTab] = useState("alerts");
 
     // Alert filters
@@ -279,6 +278,7 @@ export default function HistoryView() {
                 method: "GET",
             });
             const data = await res.json();
+            console.log(data);
             if (res.ok && data.success) {
                 setSensorData(data.data || []);
                 setSensorTotalPages(data.pagination?.totalPages || 1);
@@ -370,7 +370,7 @@ export default function HistoryView() {
         );
     }
 
-    if (!isAuthenticated || !isAdmin) {
+    if (!isAuthenticated) {
         return (
             <div className="p-6">
                 <Card>
@@ -382,7 +382,19 @@ export default function HistoryView() {
         );
     }
 
-    // Loading giống Dashboard: spinner toàn màn hình
+    if (!isAdmin && !isSuperAdmin) {
+        return (
+            <div className="p-6">
+                <Card>
+                    <CardContent className="p-6">
+                        <p className="text-red-600 font-semibold">Bạn cần quyền Admin hoặc SuperAdmin để truy cập trang này.</p>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
+
+    // Loading giống Dashboard: sp toàn màn hình
     // if (loading || loadingAlerts || loadingSensorData) {
     //     return (
     //         <div className="p-6 flex items-center justify-center min-h-screen">

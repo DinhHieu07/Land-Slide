@@ -17,8 +17,8 @@ const getSensorsByDeviceId = async (req, res) => {
                 s.type,
                 s.model,
                 s.unit,
-                s.min_threshold,
-                s.max_threshold,
+                s.warning_threshold,
+                s.danger_threshold,
                 s.created_at,
                 s.updated_at
             FROM sensors s
@@ -39,16 +39,49 @@ const getSensorsByDeviceId = async (req, res) => {
     }
 };
 
+// Lấy danh sách cảm biến theo node
+const getSensorsByNodeId = async (req, res) => {
+    try {
+        const nodeId = Number(req.params.nodeId);
+        if (!Number.isInteger(nodeId) || nodeId <= 0) {
+            return res.status(400).json({ success: false, message: 'nodeId không hợp lệ' });
+        }
+
+        const sql = `
+            SELECT
+                s.id,
+                s.code,
+                s.name,
+                s.type,
+                s.model,
+                s.unit,
+                s.warning_threshold,
+                s.danger_threshold,
+                s.created_at,
+                s.updated_at
+            FROM sensors s
+            WHERE s.node_id = $1
+            ORDER BY s.id ASC
+        `;
+
+        const { rows } = await pool.query(sql, [nodeId]);
+        return res.json({ success: true, data: rows });
+    } catch (error) {
+        console.error('getSensorsByNodeId error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
 // Cập nhật ngưỡng cảm biến
 const updateSensorThreshold = async (req, res) => {
     try {
         const { id } = req.params;
-        const { min_threshold, max_threshold } = req.body;
+        const { warning_threshold, danger_threshold } = req.body;
 
         // Validation: nếu cả 2 đều có thì min phải < max
-        if (min_threshold !== null && min_threshold !== undefined && 
-            max_threshold !== null && max_threshold !== undefined) {
-            if (min_threshold >= max_threshold) {
+        if (warning_threshold !== null && warning_threshold !== undefined && 
+            danger_threshold !== null && danger_threshold !== undefined) {
+            if (warning_threshold >= danger_threshold) {
                 return res.status(400).json({ 
                     success: false, 
                     message: 'Ngưỡng tối thiểu phải nhỏ hơn ngưỡng tối đa' 
@@ -66,16 +99,16 @@ const updateSensorThreshold = async (req, res) => {
         const updateQuery = `
             UPDATE sensors 
             SET 
-                min_threshold = $1,
-                max_threshold = $2,
+                warning_threshold = $1,
+                danger_threshold = $2,
                 updated_at = NOW()
             WHERE id = $3
-            RETURNING id, code, name, type, unit, min_threshold, max_threshold, updated_at
+            RETURNING id, code, name, type, unit, warning_threshold, danger_threshold, updated_at
         `;
 
         const result = await pool.query(updateQuery, [
-            min_threshold !== null && min_threshold !== undefined ? min_threshold : null,
-            max_threshold !== null && max_threshold !== undefined ? max_threshold : null,
+            warning_threshold !== null && warning_threshold !== undefined ? warning_threshold : null,
+            danger_threshold !== null && danger_threshold !== undefined ? danger_threshold : null,
             id
         ]);
 
@@ -92,6 +125,7 @@ const updateSensorThreshold = async (req, res) => {
 
 module.exports = {
     getSensorsByDeviceId,
+    getSensorsByNodeId,
     updateSensorThreshold,
 };
 

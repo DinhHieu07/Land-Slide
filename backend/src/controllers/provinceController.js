@@ -1,5 +1,15 @@
 const pool = require('../config/db');
 
+const listAllProvincesPublic = async (_req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT id, name, code FROM provinces ORDER BY id');
+        return res.status(200).json({ success: true, data: rows });
+    } catch (error) {
+        console.error('Lỗi khi lấy danh sách tỉnh/thành public:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
 const listProvinces = async (req, res) => {
     try {
         const { username } = req.params;
@@ -21,8 +31,8 @@ const listProvinces = async (req, res) => {
         const sql = `
             SELECT DISTINCT p.id, p.name, p.code 
             FROM provinces p
-            INNER JOIN user_provinces up ON p.id = up.province_id
-            INNER JOIN users u ON u.id = up.user_id
+             JOIN user_provinces up ON p.id = up.province_id
+             JOIN users u ON u.id = up.user_id
             WHERE u.username = $1
             ORDER BY p.id
         `;
@@ -35,5 +45,6 @@ const listProvinces = async (req, res) => {
 }
 
 module.exports = {
-    listProvinces
+    listProvinces,
+    listAllProvincesPublic,
 }

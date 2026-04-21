@@ -65,7 +65,7 @@ const categoryLabels: Record<Alert["category"], string> = {
 };
 
 export default function AlertManagement() {
-    const { isAuthenticated, isAdmin, loading } = useAuth();
+    const { isAuthenticated, isAdmin, isSuperAdmin, loading } = useAuth();
     const { socket, isConnected } = useSocket();
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [stats, setStats] = useState<AlertStats | null>(null);
@@ -296,7 +296,7 @@ export default function AlertManagement() {
         );
     }
 
-    if (!isAuthenticated || !isAdmin) {
+    if (!isAuthenticated) {
         return (
             <div className="p-6">
                 <div className="rounded-lg border bg-white p-6 shadow-sm">
@@ -308,6 +308,15 @@ export default function AlertManagement() {
         );
     }
 
+    if (!isAdmin && !isSuperAdmin) {
+        return (
+            <div className="p-6">
+                <div className="rounded-lg border bg-white p-6 shadow-sm">
+                    <p className="text-red-600 font-semibold">Bạn cần quyền Admin hoặc SuperAdmin để truy cập trang này.</p>
+                </div>
+            </div>
+        );
+    }
     return (
         <div className="space-y-6 p-6">
             {/* Header */}

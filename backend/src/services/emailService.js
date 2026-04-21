@@ -43,6 +43,38 @@ const sendAlertEmail = async (recipients, alertData) => {
     }
 };
 
+const sendOtpEmail = async (recipient, otpCode) => {
+    try {
+        if (!recipient) {
+            return { success: false, message: 'Thiếu email người nhận' };
+        }
+        if (!process.env.SENDGRID_API_KEY) {
+            return { success: false, message: 'SENDGRID_API_KEY chưa được cấu hình' };
+        }
+
+        const fromEmail = process.env.SENDGRID_FROM_EMAIL || 'noreply@landslide-monitoring.com';
+        const msg = {
+            to: recipient,
+            from: fromEmail,
+            subject: 'Mã OTP đặt lại mật khẩu',
+            html: `
+                <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+                    <h2>Mã OTP đặt lại mật khẩu</h2>
+                    <p>Mã OTP của bạn là:</p>
+                    <p style="font-size: 28px; font-weight: 700; letter-spacing: 4px;">${otpCode}</p>
+                    <p>Mã có hiệu lực trong <strong>1 phút</strong>.</p>
+                </div>
+            `,
+        };
+
+        await sgMail.send(msg);
+        return { success: true };
+    } catch (error) {
+        console.error('Lỗi khi gửi OTP email:', error);
+        return { success: false, message: error.message };
+    }
+};
+
 const generateAlertEmailHtml = (alertData) => {
     const {
         title,
@@ -240,4 +272,5 @@ const generateAlertEmailHtml = (alertData) => {
 
 module.exports = {
     sendAlertEmail,
+    sendOtpEmail,
 };

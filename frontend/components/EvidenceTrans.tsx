@@ -11,6 +11,13 @@ const TEXT_REPLACEMENTS: Record<string, string> = {
   "h": "giờ",
 };
 
+const TRANSLATE_TEXT: Record<string, string> = {
+  "rainfall": "lượng mưa",
+  "soil_moisture": "độ ẩm đất",
+  "vibration": "độ rung",
+  "tilt": "độ nghiêng",
+}
+
 export default function formatEvidenceItem(key: string, value: any) {
   const label = FIELD_NAMES[key] || key;
   let formattedValue = value;
@@ -40,7 +47,17 @@ export default function formatEvidenceItem(key: string, value: any) {
   else if (typeof value === 'boolean') {
     formattedValue = value ? "Có" : "Không";
   }
-  
+  // Object thường (vd. node_latest_data: { "tilt (°)": 1.2, ... }) — React không render object trực tiếp
+  else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    formattedValue = Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => {
+        if (v === null || v === undefined) return `${TRANSLATE_TEXT[k] || k}: —`;
+        if (typeof v === 'object') return `${TRANSLATE_TEXT[k] || k}: ${JSON.stringify(v)}`;
+        return `${TRANSLATE_TEXT[k] || k}: ${String(v)}`;
+      })
+      .join(' - ');
+  }
+
   return { label, value: formattedValue };
 }
 

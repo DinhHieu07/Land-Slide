@@ -20,7 +20,7 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function AppSidebar() {
-    const { isSuperAdmin, isAuthenticated, user, logout } = useAuth();
+    const { isAdmin, isSuperAdmin, isAuthenticated, user, logout } = useAuth();
     return (
         <Sidebar>
             <SidebarHeader className="px-4 py-4 border-b border-gray-200">
@@ -33,7 +33,7 @@ export default function AppSidebar() {
                             LandSlide
                         </span>
                         <span className="text-xs text-gray-500 leading-tight">
-                            Hệ thống giám sát
+                            Hệ thống giám sát sạt lở đất
                         </span>
                     </div>
                 </Link>
@@ -111,16 +111,29 @@ export default function AppSidebar() {
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             )}
-                            <SidebarGroupLabel>Quản lý tài khoản</SidebarGroupLabel>
-                            {isSuperAdmin && (
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton asChild>
-                                        <Link href="/account">
-                                            <Users className="size-4" />
-                                            Quản lý tài khoản
-                                        </Link>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
+                            
+                            {isAdmin && (
+                                <>
+                                    <SidebarGroupLabel>Quản trị người dùng</SidebarGroupLabel>
+                                    {isSuperAdmin && (
+                                        <SidebarMenuItem>
+                                            <SidebarMenuButton asChild>
+                                                <Link href="/account">
+                                                    <Users className="size-4" />
+                                                    Quản lý tài khoản
+                                                </Link>
+                                            </SidebarMenuButton>
+                                        </SidebarMenuItem>
+                                    )}
+                                    <SidebarMenuItem>
+                                        <SidebarMenuButton asChild>
+                                            <Link href="/province-requests">
+                                                <Users className="size-4" />
+                                                Duyệt tỉnh thành
+                                            </Link>
+                                        </SidebarMenuButton>
+                                    </SidebarMenuItem>
+                                </>
                             )}
                         </SidebarMenu>
                     </SidebarGroupContent>

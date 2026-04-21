@@ -22,7 +22,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Map, Trash, Pencil, Filter, MoreHorizontal, Info, MapPin } from "lucide-react";
+import { Map, Trash, Pencil, Filter, MoreHorizontal, Info, MapPin, Wrench } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/contexts/SocketContext";
@@ -55,15 +55,27 @@ type Sensor = {
     type: string;
     model: string | null;
     unit: string | null;
-    min_threshold: number | null;
-    max_threshold: number | null;
+    warning_threshold: number | null;
+    danger_threshold: number | null;
+};
+
+type ManagedNode = {
+    id: number;
+    node_id: string;
+    name: string | null;
+    lat: number;
+    lon: number;
+    status: Device["status"];
+    last_seen?: string | null;
+    updated_at?: string | null;
+    gateway_device_id: string;
+    gateway_name?: string | null;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const statusColor: Record<Device["status"], string> = {
     online: "bg-emerald-100 text-emerald-800",
-    offline: "bg-gray-100 text-gray-700",
     disconnected: "bg-red-100 text-red-800",
     maintenance: "bg-blue-100 text-blue-800",
 };
@@ -99,8 +111,10 @@ export default function DeviceManager() {
     const [loadingSensors, setLoadingSensors] = useState(false);
     const [sensorsError, setSensorsError] = useState<string | null>(null);
     const [editingSensor, setEditingSensor] = useState<Sensor | null>(null);
-    const [thresholdForm, setThresholdForm] = useState({ min_threshold: "", max_threshold: "" });
+    const [thresholdForm, setThresholdForm] = useState({ warning_threshold: "", danger_threshold: "" });
     const [isUpdatingThreshold, setIsUpdatingThreshold] = useState(false);
+    const [nodeSensorsOpen, setNodeSensorsOpen] = useState(false);
+    const [sensorNode, setSensorNode] = useState<ManagedNode | null>(null);
     const [page, setPage] = useState(1);
     const pageSize = 10;
     const [totalDevices, setTotalDevices] = useState(0);
@@ -109,6 +123,23 @@ export default function DeviceManager() {
     const [provinces, setProvinces] = useState<Province[]>([]);
     const [locationMode, setLocationMode] = useState<"manual" | "map">("manual");
     const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lon: number } | null>(null);
+    const [selectedLocationForNode, setSelectedLocationForNode] = useState<{ lat: number; lon: number } | null>(null);
+    const [nodeManagerOpen, setNodeManagerOpen] = useState(false);
+    const [selectedGatewayForNodes, setSelectedGatewayForNodes] = useState<Device | null>(null);
+    const [nodes, setNodes] = useState<ManagedNode[]>([]);
+    const [loadingNodes, setLoadingNodes] = useState(false);
+    const [nodesError, setNodesError] = useState<string | null>(null);
+    const [nodeDialogOpen, setNodeDialogOpen] = useState(false);
+    const [editingNode, setEditingNode] = useState<ManagedNode | null>(null);
+    const [nodeConfirmOpen, setNodeConfirmOpen] = useState(false);
+    const [confirmNodeId, setConfirmNodeId] = useState<number | null>(null);
+    const [nodeForm, setNodeForm] = useState({
+        node_id: "",
+        name: "",
+        status: "disconnected" as Device["status"],
+        lat: "",
+        lon: "",
+    });
 
     const getUsername = () => {
         try {
@@ -159,11 +190,11 @@ export default function DeviceManager() {
         if (!editingSensor) return;
 
         // Validation
-        const minVal = thresholdForm.min_threshold === "" ? null : parseFloat(thresholdForm.min_threshold);
-        const maxVal = thresholdForm.max_threshold === "" ? null : parseFloat(thresholdForm.max_threshold);
+        const minVal = thresholdForm.warning_threshold === "" ? null : parseFloat(thresholdForm.warning_threshold);
+        const maxVal = thresholdForm.danger_threshold === "" ? null : parseFloat(thresholdForm.danger_threshold);
 
         if (minVal !== null && maxVal !== null && minVal >= maxVal) {
-            setToastMessage("Ngưỡng tối thiểu phải nhỏ hơn ngưỡng tối đa");
+            setToastMessage("Ngưỡng cảnh báo phải nhỏ hơn ngưỡng nguy hiểm");
             setToastSeverity("error");
             setToastOpen(true);
             return;
@@ -174,8 +205,8 @@ export default function DeviceManager() {
             const res = await authenticatedFetch(`${API_URL}/api/sensors/${editingSensor.id}/threshold`, {
                 method: "PUT",
                 body: JSON.stringify({
-                    min_threshold: minVal,
-                    max_threshold: maxVal,
+                    warning_threshold: minVal,
+                    danger_threshold: maxVal,
                 }),
             });
             const data = await res.json();
@@ -184,12 +215,12 @@ export default function DeviceManager() {
                 setSensors((prev) =>
                     prev.map((s) =>
                         s.id === editingSensor.id
-                            ? { ...s, min_threshold: minVal, max_threshold: maxVal }
+                            ? { ...s, warning_threshold: minVal, danger_threshold: maxVal }
                             : s
                     )
                 );
                 setEditingSensor(null);
-                setThresholdForm({ min_threshold: "", max_threshold: "" });
+                setThresholdForm({ warning_threshold: "", danger_threshold: "" });
                 setToastMessage("Đã cập nhật ngưỡng cảm biến thành công");
                 setToastSeverity("success");
                 setToastOpen(true);
@@ -211,16 +242,16 @@ export default function DeviceManager() {
     const handleEditThreshold = (sensor: Sensor) => {
         setEditingSensor(sensor);
         setThresholdForm({
-            min_threshold: sensor.min_threshold !== null ? sensor.min_threshold.toString() : "",
-            max_threshold: sensor.max_threshold !== null ? sensor.max_threshold.toString() : "",
+            warning_threshold: sensor.warning_threshold !== null ? sensor.warning_threshold.toString() : "",
+            danger_threshold: sensor.danger_threshold !== null ? sensor.danger_threshold.toString() : "",
         });
     };
 
-    const fetchSensors = async (deviceId: string) => {
+    const fetchSensorsByNode = async (nodeDbId: number) => {
         setLoadingSensors(true);
         setSensorsError(null);
         try {
-            const res = await authenticatedFetch(`${API_URL}/api/sensors/by-device/${deviceId}`, { method: "GET" });
+            const res = await authenticatedFetch(`${API_URL}/api/sensors/by-node/${nodeDbId}`, { method: "GET" });
             const data = await res.json();
             if (res.ok && data?.success) {
                 setSensors(data.data || []);
@@ -234,6 +265,167 @@ export default function DeviceManager() {
             setSensorsError("Không thể tải danh sách cảm biến.");
         } finally {
             setLoadingSensors(false);
+        }
+    };
+
+    const openNodeSensors = async (node: ManagedNode) => {
+        setSensorNode(node);
+        setSensors([]);
+        setNodeSensorsOpen(true);
+        await fetchSensorsByNode(node.id);
+    };
+
+    const statusText = (statusValue?: string) =>
+        statusValue === "disconnected"
+            ? "Mất kết nối"
+            : statusValue === "maintenance"
+                ? "Bảo trì"
+                : statusValue === "online"
+                    ? "Hoạt động"
+                    : statusValue || "N/A";
+
+    const resetNodeForm = () => {
+        setNodeForm({
+            node_id: "",
+            name: "",
+            status: "disconnected",
+            lat: "",
+            lon: "",
+        });
+    };
+
+    const fetchNodesByGateway = async (gatewayDeviceId: string) => {
+        setLoadingNodes(true);
+        setNodesError(null);
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/nodes/by-gateway/${encodeURIComponent(gatewayDeviceId)}`, {
+                method: "GET",
+            });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                setNodes(data.data || []);
+            } else {
+                setNodes([]);
+                setNodesError(data?.message || "Không thể tải danh sách node.");
+            }
+        } catch (error) {
+            console.error("Lỗi khi lấy danh sách node:", error);
+            setNodes([]);
+            setNodesError("Không thể tải danh sách node.");
+        } finally {
+            setLoadingNodes(false);
+        }
+    };
+
+    const openNodeManager = async (gateway: Device) => {
+        setSelectedGatewayForNodes(gateway);
+        setNodeManagerOpen(true);
+        setEditingNode(null);
+        resetNodeForm();
+        await fetchNodesByGateway(gateway.device_id);
+    };
+
+    const handleCreateNode = () => {
+        setEditingNode(null);
+        resetNodeForm();
+        setNodeDialogOpen(true);
+    };
+
+    const handleEditNode = (node: ManagedNode) => {
+        setEditingNode(node);
+        setNodeForm({
+            node_id: node.node_id,
+            name: node.name || "",
+            status: node.status || "disconnected",
+            lat: String(node.lat),
+            lon: String(node.lon),
+        });
+        setNodeDialogOpen(true);
+    };
+
+    const handleSubmitNode = async () => {
+        if (!selectedGatewayForNodes) {
+            setToastMessage("Chưa chọn Gateway để quản lý Node.");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        const payload = {
+            node_id: nodeForm.node_id.trim(),
+            name: nodeForm.name.trim() || null,
+            status: nodeForm.status,
+            lat: Number(nodeForm.lat),
+            lon: Number(nodeForm.lon),
+            gatewayDeviceId: selectedGatewayForNodes.device_id,
+        };
+
+        if (!payload.node_id || Number.isNaN(payload.lat) || Number.isNaN(payload.lon)) {
+            setToastMessage("Vui lòng nhập đầy đủ node_id và tọa độ hợp lệ.");
+            setToastSeverity("error");
+            setToastOpen(true);
+            return;
+        }
+
+        try {
+            const isEditing = Boolean(editingNode);
+            const res = await authenticatedFetch(
+                isEditing ? `${API_URL}/api/nodes/${editingNode?.id}` : `${API_URL}/api/nodes`,
+                {
+                    method: isEditing ? "PUT" : "POST",
+                    body: JSON.stringify(payload),
+                }
+            );
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                setNodeDialogOpen(false);
+                setEditingNode(null);
+                resetNodeForm();
+                setToastMessage(isEditing ? "Cập nhật node thành công" : "Thêm node thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+                await fetchNodesByGateway(selectedGatewayForNodes.device_id);
+            } else {
+                setToastMessage(data?.message || "Lưu node thất bại");
+                setToastSeverity("error");
+                setToastOpen(true);
+            }
+        } catch (error) {
+            console.error("Lỗi khi lưu node:", error);
+            setToastMessage("Lỗi kết nối máy chủ khi lưu node");
+            setToastSeverity("error");
+            setToastOpen(true);
+        }
+    };
+
+    const handleDeleteNode = async () => {
+        if (!confirmNodeId || !selectedGatewayForNodes) return;
+        try {
+            const res = await authenticatedFetch(`${API_URL}/api/nodes/${confirmNodeId}`, {
+                method: "DELETE",
+            });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                setToastMessage("Xóa node thành công");
+                setToastSeverity("success");
+                setToastOpen(true);
+                setNodeConfirmOpen(false);
+                setConfirmNodeId(null);
+                await fetchNodesByGateway(selectedGatewayForNodes.device_id);
+            } else {
+                setToastMessage(data?.message || "Xóa node thất bại");
+                setToastSeverity("error");
+                setToastOpen(true);
+                setNodeConfirmOpen(false);
+                setConfirmNodeId(null);
+            }
+        } catch (error) {
+            console.error("Lỗi khi xóa node:", error);
+            setToastMessage("Lỗi kết nối máy chủ khi xóa node");
+            setToastSeverity("error");
+            setToastOpen(true);
+            setNodeConfirmOpen(false);
+            setConfirmNodeId(null);
         }
     };
 
@@ -335,6 +527,7 @@ export default function DeviceManager() {
                     updated_at: data.data.updated_at,
                     managers: data.data.managers || [username],
                 };
+                console.log(newDevice);
                 if (editing) {
                     setDevices(devices.map((d) => d.device_id === editing.device_id ? newDevice : d));
                 } else {
@@ -413,7 +606,7 @@ export default function DeviceManager() {
         if (page > totalPages) setPage(totalPages);
     }, [page, totalPages]);
 
-    // Trạng thái loading spinner 
+    // Trạng thái loading sp 
     // if (loading || loadingDevices) {
     //     return (
     //         <div className="p-6 flex items-center justify-center min-h-screen">
@@ -484,7 +677,7 @@ export default function DeviceManager() {
         );
     }
 
-    if (!isAuthenticated || !isAdmin) {
+    if (!isAuthenticated) {
         return (
             <div className="p-6">
                 <div className="rounded-lg border bg-white p-6 shadow-sm">
@@ -494,6 +687,16 @@ export default function DeviceManager() {
         );
     }
 
+    if (!isAdmin && !isSuperAdmin) {
+        return (
+            <div className="p-6">
+                <div className="rounded-lg border bg-white p-6 shadow-sm">
+                    <p className="text-red-600 font-semibold">Bạn cần quyền Admin hoặc SuperAdmin để truy cập trang này.</p>
+                </div>
+            </div>
+        );
+    }
+    
     // Không thể tải dữ liệu 
     if (!loadingDevices && devicesError) {
         return (
@@ -798,7 +1001,6 @@ export default function DeviceManager() {
                                                     onClick={() => {
                                                         setDetailDevice(d);
                                                         setDetailOpen(true);
-                                                        fetchSensors(d.device_id);
                                                     }}
                                                 >
                                                     <Info className="mr-2 size-4" />
@@ -810,6 +1012,13 @@ export default function DeviceManager() {
                                                 >
                                                     <Map className="mr-2 size-4" />
                                                     <span>Xem map</span>
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    className="cursor-pointer hover:bg-gray-100"
+                                                    onClick={() => openNodeManager(d)}
+                                                >
+                                                    <MapPin className="mr-2 size-4" />
+                                                    <span>Quản lý Node</span>
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     className="cursor-pointer hover:bg-gray-100"
@@ -921,82 +1130,96 @@ export default function DeviceManager() {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
-                        <div className="rounded-lg border overflow-hidden">
-                            <div className="bg-gray-50 px-4 py-3 font-semibold">Danh sách cảm biến</div>
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full text-sm">
-                                    <thead className="bg-gray-50">
+            {/* Dialog chi tiết cảm biến theo Node */}
+            <Dialog
+                open={nodeSensorsOpen}
+                onOpenChange={(open) => {
+                    setNodeSensorsOpen(open);
+                    if (!open) {
+                        setSensorNode(null);
+                        setSensors([]);
+                        setSensorsError(null);
+                        setLoadingSensors(false);
+                    }
+                }}
+            >
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle>Chi tiết cảm biến Node</DialogTitle>
+                        <DialogDescription>
+                            {sensorNode ? `Node ${sensorNode.node_id} (${sensorNode.name || "—"})` : "Danh sách cảm biến"}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="rounded-lg border overflow-hidden">
+                        <div className="bg-gray-50 px-4 py-3 font-semibold">4 cảm biến</div>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left">Mã</th>
+                                        <th className="px-4 py-3 text-left">Tên</th>
+                                        <th className="px-4 py-3 text-left">Loại</th>
+                                        <th className="px-4 py-3 text-left">Đơn vị</th>
+                                        <th className="px-4 py-3 text-left">Ngưỡng</th>
+                                        <th className="px-4 py-3 text-left">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {loadingSensors && (
                                         <tr>
-                                            <th className="px-4 py-3 text-left">Mã</th>
-                                            <th className="px-4 py-3 text-left">Tên</th>
-                                            <th className="px-4 py-3 text-left">Loại</th>
-                                            <th className="px-4 py-3 text-left">Model</th>
-                                            <th className="px-4 py-3 text-left">Đơn vị</th>
-                                            <th className="px-4 py-3 text-left">Ngưỡng</th>
-                                            <th className="px-4 py-3 text-left">Thao tác</th>
+                                            <td colSpan={6} className="px-4 py-6 text-center text-gray-600">
+                                                Đang tải cảm biến...
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        {loadingSensors && (
-                                            <tr>
-                                                <td colSpan={7} className="px-4 py-6 text-center">
-                                                    <div className="flex flex-col items-center justify-center">
-                                                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-3"></div>
-                                                        <p className="text-gray-600">Đang tải cảm biến...</p>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {!loadingSensors && sensorsError && (
-                                            <tr>
-                                                <td colSpan={7} className="px-4 py-4 text-center text-red-600">
-                                                    {sensorsError}
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {!loadingSensors && !sensorsError && sensors.length === 0 && (
-                                            <tr>
-                                                <td colSpan={7} className="px-4 py-4 text-center text-gray-600">
-                                                    Không có cảm biến nào
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {!loadingSensors && !sensorsError && sensors.map((s) => (
-                                            <tr key={s.id} className="border-t">
-                                                <td className="px-4 py-3 font-medium text-gray-900">{s.code}</td>
-                                                <td className="px-4 py-3 text-gray-700">{s.name || "—"}</td>
-                                                <td className="px-4 py-3 text-gray-700">{s.type}</td>
-                                                <td className="px-4 py-3 text-gray-700">{s.model || "—"}</td>
-                                                <td className="px-4 py-3 text-gray-700">{s.unit || "—"}</td>
-                                                <td className="px-4 py-3 text-gray-700">
-                                                    <div className="text-xs">
-                                                        {s.min_threshold !== null && s.max_threshold !== null ? (
-                                                            <span>{s.min_threshold} - {s.max_threshold} {s.unit || ""}</span>
-                                                        ) : s.min_threshold !== null ? (
-                                                            <span>Min: {s.min_threshold} {s.unit || ""}</span>
-                                                        ) : s.max_threshold !== null ? (
-                                                            <span>Max: {s.max_threshold} {s.unit || ""}</span>
-                                                        ) : (
-                                                            <span className="text-gray-400">Chưa đặt</span>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={() => handleEditThreshold(s)}
-                                                    >
-                                                        <Pencil className="size-3 mr-1" />
-                                                        Sửa
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                    )}
+                                    {!loadingSensors && sensorsError && (
+                                        <tr>
+                                            <td colSpan={6} className="px-4 py-4 text-center text-red-600">
+                                                {sensorsError}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {!loadingSensors && !sensorsError && sensors.length === 0 && (
+                                        <tr>
+                                            <td colSpan={6} className="px-4 py-4 text-center text-gray-600">
+                                                Không có cảm biến nào
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {!loadingSensors && !sensorsError && sensors.slice(0, 4).map((s) => (
+                                        <tr key={s.id} className="border-t">
+                                            <td className="px-4 py-3 font-medium text-gray-900">{s.code}</td>
+                                            <td className="px-4 py-3 text-gray-700">{s.name || "—"}</td>
+                                            <td className="px-4 py-3 text-gray-700">{s.type}</td>
+                                            <td className="px-4 py-3 text-gray-700">{s.unit || "—"}</td>
+                                            <td className="px-4 py-3 text-gray-700">
+                                                <div className="text-xs">
+                                                    {s.warning_threshold !== null && s.danger_threshold !== null ? (
+                                                        <span>{s.warning_threshold} - {s.danger_threshold} {s.unit || ""}</span>
+                                                    ) : s.warning_threshold !== null ? (
+                                                        <span>Cảnh báo: {s.warning_threshold} {s.unit || ""}</span>
+                                                    ) : s.danger_threshold !== null ? (
+                                                        <span>Nguy hiểm: {s.danger_threshold} {s.unit || ""}</span>
+                                                    ) : (
+                                                        <span className="text-gray-400">Chưa đặt</span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <Button variant="outline" size="sm" onClick={() => handleEditThreshold(s)}>
+                                                    <Pencil className="size-3 mr-1" />
+                                                    Sửa ngưỡng
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </DialogContent>
@@ -1013,33 +1236,33 @@ export default function DeviceManager() {
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <Label htmlFor="min_threshold">
-                                Ngưỡng tối thiểu {editingSensor?.unit && `(${editingSensor.unit})`}
+                            <Label htmlFor="warning_threshold">
+                                Ngưỡng cảnh báo {editingSensor?.unit && `(${editingSensor.unit})`}
                             </Label>
                             <Input
-                                id="min_threshold"
+                                id="warning_threshold"
                                 type="number"
                                 step="any"
                                 placeholder="Để trống nếu không cần"
-                                value={thresholdForm.min_threshold}
-                                onChange={(e) => setThresholdForm({ ...thresholdForm, min_threshold: e.target.value })}
+                                value={thresholdForm.warning_threshold}
+                                onChange={(e) => setThresholdForm({ ...thresholdForm, warning_threshold: e.target.value })}
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="max_threshold">
-                                Ngưỡng tối đa {editingSensor?.unit && `(${editingSensor.unit})`}
+                            <Label htmlFor="danger_threshold">
+                                Ngưỡng nguy hiểm {editingSensor?.unit && `(${editingSensor.unit})`}
                             </Label>
                             <Input
-                                id="max_threshold"
+                                id="danger_threshold"
                                 type="number"
                                 step="any"
                                 placeholder="Để trống nếu không cần"
-                                value={thresholdForm.max_threshold}
-                                onChange={(e) => setThresholdForm({ ...thresholdForm, max_threshold: e.target.value })}
+                                value={thresholdForm.danger_threshold}
+                                onChange={(e) => setThresholdForm({ ...thresholdForm, danger_threshold: e.target.value })}
                             />
                         </div>
                         <div className="text-xs text-muted-foreground">
-                            <p>• Ngưỡng tối thiểu phải nhỏ hơn ngưỡng tối đa</p>
+                            <p>• Ngưỡng cảnh báo phải nhỏ hơn ngưỡng nguy hiểm</p>
                             <p>• Hệ thống sẽ tạo cảnh báo khi giá trị vượt quá ngưỡng</p>
                         </div>
                     </div>
@@ -1050,6 +1273,248 @@ export default function DeviceManager() {
                         <Button onClick={handleUpdateThreshold} disabled={isUpdatingThreshold}>
                             {isUpdatingThreshold ? "Đang lưu..." : "Lưu"}
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={nodeManagerOpen}
+                onOpenChange={(open) => {
+                    setNodeManagerOpen(open);
+                    if (!open) {
+                        setSelectedGatewayForNodes(null);
+                        setNodes([]);
+                        setNodesError(null);
+                    }
+                }}
+            >
+                <DialogContent className="max-w-5xl">
+                    <DialogHeader>
+                        <DialogTitle>Quản lý Node theo Gateway</DialogTitle>
+                        <DialogDescription>
+                            {selectedGatewayForNodes
+                                ? `${selectedGatewayForNodes.name} (${selectedGatewayForNodes.device_id}) — ${selectedGatewayForNodes.province_name || "Chưa rõ"}`
+                                : "Danh sách node theo gateway"}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="rounded-lg border p-3 bg-slate-50 text-sm text-gray-700">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <span><strong>Gateway:</strong> {selectedGatewayForNodes?.device_id || "—"}</span>
+                                <span><strong>Trạng thái:</strong> {statusText(selectedGatewayForNodes?.status)}</span>
+                                <span><strong>Lat/Lon:</strong> {selectedGatewayForNodes ? `${selectedGatewayForNodes.lat}, ${selectedGatewayForNodes.lon}` : "—"}</span>
+                            </div>
+                        </div>
+                        <div className="flex justify-end">
+                            <Button onClick={handleCreateNode}>Thêm Node</Button>
+                        </div>
+                        <div className="rounded-lg border overflow-hidden">
+                            <div className="bg-gray-50 px-4 py-3 font-semibold">Danh sách Node</div>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left">Node ID</th>
+                                            <th className="px-4 py-3 text-left">Tên</th>
+                                            <th className="px-4 py-3 text-left">Trạng thái</th>
+                                            <th className="px-4 py-3 text-left">Vị trí</th>
+                                            <th className="px-4 py-3 text-left">Cập nhật</th>
+                                            <th className="px-4 py-3 text-left">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {loadingNodes && (
+                                            <tr>
+                                                <td colSpan={6} className="px-4 py-6 text-center text-gray-600">
+                                                    Đang tải danh sách node...
+                                                </td>
+                                            </tr>
+                                        )}
+                                        {!loadingNodes && nodesError && (
+                                            <tr>
+                                                <td colSpan={6} className="px-4 py-4 text-center text-red-600">{nodesError}</td>
+                                            </tr>
+                                        )}
+                                        {!loadingNodes && !nodesError && nodes.length === 0 && (
+                                            <tr>
+                                                <td colSpan={6} className="px-4 py-4 text-center text-gray-600">Gateway chưa có node nào</td>
+                                            </tr>
+                                        )}
+                                        {!loadingNodes && !nodesError && nodes.map((n) => (
+                                            <tr key={n.id} className="border-t">
+                                                <td className="px-4 py-3 font-medium text-gray-900">{n.node_id}</td>
+                                                <td className="px-4 py-3 text-gray-700">{n.name || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusColor[n.status || "offline"]}`}>
+                                                        {statusText(n.status)}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-gray-700">{n.lat}, {n.lon}</td>
+                                                <td className="px-4 py-3 text-gray-700">{n.updated_at ? new Date(n.updated_at).toLocaleString("vi-VN") : "N/A"}</td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex gap-2">
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon">
+                                                                <MoreHorizontal className="mr-1 size-3" />
+                                                            </Button></DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end">
+                                                                <DropdownMenuItem className="cursor-pointer hover:bg-gray-100" onClick={() => handleEditNode(n)}>
+                                                                    <Wrench className="mr-1 size-3" />
+                                                                    Sửa
+                                                                </DropdownMenuItem>
+                                                                <DropdownMenuItem
+                                                                    className="cursor-pointer hover:bg-gray-100"
+                                                                    onClick={() => openNodeSensors(n)}
+                                                                >
+                                                                    <Pencil className="mr-1 size-3" />
+                                                                    Chi tiết cảm biến
+                                                                </DropdownMenuItem>
+                                                                <DropdownMenuItem className="cursor-pointer hover:bg-gray-100" onClick={() => {
+                                                                    setConfirmNodeId(n.id);
+                                                                    setNodeConfirmOpen(true);
+                                                                }}>
+                                                                    <Trash className="mr-1 size-3" />
+                                                                    Xóa
+                                                                </DropdownMenuItem>
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={nodeDialogOpen}
+                onOpenChange={(open) => {
+                    setNodeDialogOpen(open);
+                    if (!open) {
+                        setEditingNode(null);
+                        resetNodeForm();
+                    }
+                }}
+            >
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>{editingNode ? "Sửa Node" : "Thêm Node"}</DialogTitle>
+                        <DialogDescription>
+                            {selectedGatewayForNodes
+                                ? `Gateway: ${selectedGatewayForNodes.name} (${selectedGatewayForNodes.device_id})`
+                                : "Nhập thông tin node"}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="node_id">Node ID</Label>
+                            <Input
+                                id="node_id"
+                                value={nodeForm.node_id}
+                                onChange={(e) => setNodeForm({ ...nodeForm, node_id: e.target.value })}
+                                disabled={Boolean(editingNode)}
+                                placeholder="VD: NODE_001"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="node_name">Tên Node</Label>
+                            <Input
+                                id="node_name"
+                                value={nodeForm.name}
+                                onChange={(e) => setNodeForm({ ...nodeForm, name: e.target.value })}
+                                placeholder="Tên hiển thị của node"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Trạng thái</Label>
+                            <Select value={nodeForm.status} onValueChange={(value) => setNodeForm({ ...nodeForm, status: value as Device["status"] })}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Chọn trạng thái" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="online">Hoạt động</SelectItem>
+                                    <SelectItem value="disconnected">Mất kết nối</SelectItem>
+                                    <SelectItem value="maintenance">Bảo trì</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <Tabs value={locationMode} onValueChange={(v) => setLocationMode(v as "manual" | "map")}>
+                            <TabsList className="grid w-full grid-cols-2">
+                                <TabsTrigger value="manual">
+                                    <MapPin className="size-4 mr-2" />
+                                    Nhập tay
+                                </TabsTrigger>
+                                <TabsTrigger value="map">
+                                    <Map className="size-4 mr-2" />
+                                    Chọn trên Map
+                                </TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="manual">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="node_lat">Vĩ độ</Label>
+                                        <Input
+                                            id="node_lat"
+                                            type="number"
+                                            step="any"
+                                            value={nodeForm.lat}
+                                            onChange={(e) => setNodeForm({ ...nodeForm, lat: e.target.value })}
+                                            placeholder="Nhập vĩ độ"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="node_lon">Kinh độ</Label>
+                                        <Input
+                                            id="node_lon"
+                                            type="number"
+                                            step="any"
+                                            value={nodeForm.lon}
+                                            onChange={(e) => setNodeForm({ ...nodeForm, lon: e.target.value })}
+                                            placeholder="Nhập kinh độ"
+                                        />
+                                    </div>
+                                </div>
+                            </TabsContent>
+                            <TabsContent value="map">
+                                <LocationPickerMap
+                                    onLocationSelect={(lat, lon) => {
+                                        setNodeForm({ ...nodeForm, lat: lat.toFixed(6), lon: lon.toFixed(6) });
+                                        setSelectedLocationForNode({ lat, lon });
+                                    }}
+                                    initialLat={nodeForm.lat ? Number(nodeForm.lat) : undefined}
+                                    initialLon={nodeForm.lon ? Number(nodeForm.lon) : undefined}
+                                />
+                                {selectedLocationForNode && (
+                                    <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                        <MapPin className="size-3" />
+                                        <span>
+                                            Đã chọn: {selectedLocationForNode.lat.toFixed(6)}, {selectedLocationForNode.lon.toFixed(6)}
+                                        </span>
+                                    </div>
+                                )}
+                            </TabsContent>
+                        </Tabs>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setNodeDialogOpen(false)}>Hủy</Button>
+                        <Button onClick={handleSubmitNode}>{editingNode ? "Lưu thay đổi" : "Thêm Node"}</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={nodeConfirmOpen} onOpenChange={setNodeConfirmOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Xóa node</DialogTitle>
+                        <DialogDescription>Bạn có chắc chắn muốn xóa node này không?</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setNodeConfirmOpen(false)}>Hủy</Button>
+                        <Button variant="destructive" onClick={handleDeleteNode}>Xóa</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

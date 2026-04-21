@@ -32,8 +32,8 @@ const listDevices = async (req, res) => {
         if (username && !isSuperAdmin) {
             values.push(username);
             usernameJoin = `
-                INNER JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
-                INNER JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
+                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
             `;
         }
 
@@ -240,6 +240,11 @@ const updateDevice = async (req, res) => {
         const { id } = req.params; // id hoặc device_id
         const { name, status, lat, lon, latest_data, last_seen, updated_at, province_id, area_id } = req.body;
 
+        const province = await pool.query(`SELECT name, code FROM provinces WHERE id = $1`, [province_id]);
+        if (!province.rows.length) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tỉnh/thành phố' });
+        }
+
         const fields = [];
         const values = [];
 
@@ -270,7 +275,7 @@ const updateDevice = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị' });
         }
 
-        return res.json({ success: true, data: result.rows[0] });
+        return res.json({ success: true, data: { ...result.rows[0], province_name: province.rows[0].name, province_code: province.rows[0].code } });
     } catch (error) {
         console.error('updateDevice error:', error);
         return res.status(500).json({ success: false, message: 'Lỗi server' });

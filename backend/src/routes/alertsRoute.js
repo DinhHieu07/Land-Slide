@@ -8,10 +8,12 @@ const {
     updateAlertStatus, 
     createAlert,
     getAlertStats,
-    getEvidenceData
+    getEvidenceData,
+    getAlertHeatmap,
 } = require('../controllers/alertController');
 
 router.get('/evidence-data', getEvidenceData);
+router.get('/heatmap', authenticateToken, roleMiddleware(['admin', 'superAdmin']), getAlertHeatmap);
 router.get('/', authenticateToken, roleMiddleware(['admin', 'superAdmin']), listAlerts);
 router.get('/stats', authenticateToken, roleMiddleware(['admin', 'superAdmin']), getAlertStats);
 router.get('/:id', authenticateToken, roleMiddleware(['admin', 'superAdmin']), getAlertById);

@@ -1,6 +1,27 @@
 const pool = require('../config/db');
 const { sendAlertEmail } = require('../services/emailService');
 
+function getHeatmapWeight(row) {
+    const alertLevel = Number(row.alert_level || 0);
+    const severity = String(row.severity || '').toLowerCase();
+    const category = String(row.category || '').toLowerCase();
+    const text = `${row.title || ''} ${row.message || ''}`.toLowerCase();
+
+    if (alertLevel >= 3) return 1.0;
+    if (alertLevel >= 2) return 0.75;
+    if (alertLevel >= 1) return 0.5;
+
+    if (severity === 'critical') return 1.0;
+    if (severity === 'warning') return 0.75;
+    if (severity === 'info') return 0.5;
+
+    if (category.includes('connect') || text.includes('mất kết nối') || text.includes('mat ket noi')) {
+        return 0.8;
+    }
+
+    return 0.45;
+}
+
 // Danh sách cảnh báo với filter và pagination
 const listAlerts = async (req, res) => {
     try {
@@ -63,8 +84,8 @@ const listAlerts = async (req, res) => {
         if (username && !isSuperAdmin) {
             values.push(username);
             usernameJoin = `
-                INNER JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
-                INNER JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
+                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
             `;
         }
 
@@ -357,7 +378,7 @@ const createAlert = async (req, res) => {
                             u.role,
                             COALESCE(u.email, u.username || '@' || $1::text) as email
                         FROM users u
-                        INNER JOIN user_provinces up ON u.id = up.user_id
+                         JOIN user_provinces up ON u.id = up.user_id
                         WHERE up.province_id = $2
                         UNION
                         SELECT 
@@ -377,7 +398,7 @@ const createAlert = async (req, res) => {
                             u.role,
                             (u.username || '@' || $1::text) as email
                         FROM users u
-                        INNER JOIN user_provinces up ON u.id = up.user_id
+                         JOIN user_provinces up ON u.id = up.user_id
                         WHERE up.province_id = $2
                         UNION
                         SELECT 
@@ -468,9 +489,9 @@ const getAlertStats = async (req, res) => {
         if (username && !isSuperAdmin) {
             values.push(username);
             usernameJoin = `
-                INNER JOIN devices d ON a.device_id = d.id
-                INNER JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
-                INNER JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
+                 JOIN devices d ON a.device_id = d.id
+                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
             `;
         }
 
@@ -505,6 +526,143 @@ const getEvidenceData = async (req, res) => {
     }
 };
 
+/** Điểm nhiệt theo cảnh báo active (bản đồ) */
+const getAlertHeatmap = async (req, res) => {
+    try {
+        const { username, hours = '24', type = 'all' } = req.query;
+        const h = Math.min(168, Math.max(1, parseInt(String(hours), 10) || 24));
+        const userRole = req.user?.role;
+        const isSuperAdmin = userRole === 'superAdmin';
+
+        const params = [`${h} hours`];
+        const where = [
+            "a.status = 'active'",
+            "a.created_at >= NOW() - $1::interval",
+        ];
+
+        let permissionJoin = '';
+        if (!isSuperAdmin) {
+            if (!username) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            params.push(username);
+            permissionJoin = `
+                JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${params.length}
+            `;
+        }
+
+        if (type === 'threshold') {
+            where.push("COALESCE(a.evidence_data->>'node_id', '') <> ''");
+        } else if (type === 'disconnect') {
+            where.push(
+                "(LOWER(COALESCE(a.message,'')) LIKE '%mất kết nối%' OR LOWER(COALESCE(a.title,'')) LIKE '%mất kết nối%' OR LOWER(COALESCE(a.category,'')) LIKE '%connect%')"
+            );
+        }
+
+        const sql = `
+            SELECT
+                a.id,
+                a.severity,
+                a.category,
+                a.title,
+                a.message,
+                a.created_at,
+                d.device_id AS device_code,
+                d.name AS device_name,
+                COALESCE(a.evidence_data->>'node_id', '') AS node_id,
+                COALESCE(a.evidence_data->>'alert_level', '') AS alert_level,
+                n.lat AS node_lat,
+                n.lon AS node_lon,
+                d.lat AS device_lat,
+                d.lon AS device_lon
+            FROM alerts a
+            JOIN devices d ON d.id = a.device_id
+            LEFT JOIN nodes n
+                ON n.device_id = d.id
+               AND UPPER(TRIM(n.node_id)) = UPPER(TRIM(COALESCE(a.evidence_data->>'node_id', '')))
+            ${permissionJoin}
+            WHERE ${where.join(' AND ')}
+        `;
+
+        const { rows } = await pool.query(sql, params);
+
+        /** Mức cao nhất theo từng Gateway (mọi cảnh báo của GW + Node thuộc GW) — đồng bộ màu Node vs GW */
+        const deviceMaxLevel = new Map();
+        for (const r of rows) {
+            const code = r.device_code;
+            const w = getHeatmapWeight(r);
+            const lv = w >= 0.95 ? 3 : w >= 0.7 ? 2 : 1;
+            deviceMaxLevel.set(code, Math.max(deviceMaxLevel.get(code) || 0, lv));
+        }
+
+        const pointMap = new Map();
+
+        for (const r of rows) {
+            const lat = r.node_lat ?? r.device_lat;
+            const lon = r.node_lon ?? r.device_lon;
+            if (lat === null || lon === null) continue;
+
+            const weight = getHeatmapWeight(r);
+            const level = weight >= 0.95 ? 3 : weight >= 0.7 ? 2 : 1;
+            const key = `${Number(lat).toFixed(6)}_${Number(lon).toFixed(6)}`;
+            const cur = pointMap.get(key);
+
+            if (!cur) {
+                pointMap.set(key, {
+                    lat: Number(lat),
+                    lon: Number(lon),
+                    weight,
+                    count: 1,
+                    max_level: level,
+                    latest_at: r.created_at,
+                    device_code: r.device_code,
+                    node_id: r.node_id || null,
+                    alert_types: [r.category || 'unknown'],
+                });
+            } else {
+                cur.weight += weight;
+                cur.count += 1;
+                cur.max_level = Math.max(cur.max_level, level);
+                if (new Date(r.created_at).getTime() > new Date(cur.latest_at).getTime()) {
+                    cur.latest_at = r.created_at;
+                    cur.device_code = r.device_code;
+                    cur.node_id = r.node_id || null;
+                }
+                const cat = r.category || 'unknown';
+                if (!cur.alert_types.includes(cat)) cur.alert_types.push(cat);
+            }
+        }
+
+        let points = Array.from(pointMap.values()).map((p) => ({
+            ...p,
+            max_level: Math.max(p.max_level, deviceMaxLevel.get(p.device_code) || 0),
+            weight: Math.min(3, Number(p.weight.toFixed(2))),
+        }));
+
+        /** Cùng một Gateway: mọi điểm (GW + các Node) dùng chung một mức = max trên toàn hệ */
+        const unifiedByDevice = new Map();
+        for (const p of points) {
+            const code = p.device_code;
+            if (!code) continue;
+            unifiedByDevice.set(code, Math.max(unifiedByDevice.get(code) || 0, p.max_level));
+        }
+        points = points.map((p) => ({
+            ...p,
+            max_level: p.device_code ? unifiedByDevice.get(p.device_code) ?? p.max_level : p.max_level,
+        }));
+
+        return res.json({
+            success: true,
+            window_hours: h,
+            points,
+        });
+    } catch (error) {
+        console.error('getAlertHeatmap error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
 module.exports = {
     listAlerts,
     getAlertById,
@@ -512,4 +670,5 @@ module.exports = {
     createAlert,
     getAlertStats,
     getEvidenceData,
+    getAlertHeatmap,
 };

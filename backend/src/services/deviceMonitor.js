@@ -155,7 +155,7 @@ const createOfflineAlert = async (device) => {
                             ELSE u.username || '@' || $1::text
                         END as email
                     FROM users u
-                    INNER JOIN user_provinces up ON u.id = up.user_id
+                     JOIN user_provinces up ON u.id = up.user_id
                     WHERE up.province_id = $2
                     UNION
                     SELECT 
@@ -238,9 +238,6 @@ const startDeviceMonitor = (socketIO, schedule = '*/1 * * * *', timeoutMinutes =
     });
 
     console.log(`[DeviceMonitor] Đã khởi động cronjob kiểm tra thiết bị offline`);
-    console.log(`[DeviceMonitor] - Schedule: ${schedule} (mỗi ${timeoutMinutes} phút)`);
-    console.log(`[DeviceMonitor] - Timeout: ${timeoutMinutes} phút`);
-    console.log(`[DeviceMonitor] - Tạo alert: ${createAlert ? 'Có' : 'Không'}`);
 };
 
 const stopDeviceMonitor = () => {

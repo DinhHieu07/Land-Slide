@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Toast } from "./Toast";
+import LivingProvinceDialog from "./LivingProvinceDialog";
 
 interface RegisterDialogProps {
     onRegisterSuccess?: () => void;
@@ -29,6 +30,8 @@ export function RegisterDialog({ onRegisterSuccess }: RegisterDialogProps) {
     const [toastOpen, setToastOpen] = useState(false);
     const [toastMessage, setToastMessage] = useState("");
     const [toastSeverity, setToastSeverity] = useState<"success" | "error">("success");
+    const [provinceDialogOpen, setProvinceDialogOpen] = useState(false);
+    const [registeredUsername, setRegisteredUsername] = useState("");
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -64,6 +67,8 @@ export function RegisterDialog({ onRegisterSuccess }: RegisterDialogProps) {
                 setToastMessage("Đăng ký thành công! Vui lòng đăng nhập để tiếp tục.");
                 setToastSeverity("success");
                 setToastOpen(true);
+                setRegisteredUsername(username.trim());
+                setProvinceDialogOpen(true);
                 setOpen(false);
                 setUsername("");
                 setPassword("");
@@ -102,12 +107,12 @@ export function RegisterDialog({ onRegisterSuccess }: RegisterDialogProps) {
                     <form onSubmit={handleSubmit}>
                         <div className="grid gap-4 py-4">
                             <div className="grid gap-2">
-                                <Label htmlFor="reg-username">Tên đăng nhập</Label>
+                                <Label htmlFor="reg-username">Tên đăng nhập (Email)</Label>
                                 <Input
                                     id="reg-username"
                                     value={username}
                                     onChange={(e) => setUsername(e.target.value)}
-                                    placeholder="Nhập tên đăng nhập"
+                                    placeholder="Nhập tên đăng nhập (Email)"
                                     required
                                     disabled={loading}
                                 />
@@ -151,7 +156,14 @@ export function RegisterDialog({ onRegisterSuccess }: RegisterDialogProps) {
                 severity={toastSeverity}
                 onClose={() => setToastOpen(false)}
             />
+            <LivingProvinceDialog
+                open={provinceDialogOpen}
+                onOpenChange={setProvinceDialogOpen}
+                username={registeredUsername}
+                authenticated={false}
+                title="Chọn tỉnh thành đang sinh sống"
+                description="Bạn có thể chọn ngay bây giờ hoặc để sau. Lựa chọn sẽ ở trạng thái chờ admin duyệt."
+            />
         </>
     );
 }
-

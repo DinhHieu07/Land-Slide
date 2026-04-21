@@ -46,7 +46,16 @@ const listAccounts = async (req, res) => {
                 role,
                 avatar,
                 created_at,
-                updated_at
+                updated_at,
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM user_province_requests upr
+                        WHERE upr.user_id = users.id
+                          AND upr.status = 'pending'
+                    ) THEN 'pending'
+                    ELSE 'approved'
+                END AS province_request_status
             FROM users
             ${whereClause}
             ORDER BY created_at DESC
@@ -109,7 +118,7 @@ const createAccount = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Mật khẩu phải có ít nhất 6 ký tự' });
         }
 
-        if (!['admin', 'superAdmin'].includes(role)) {
+        if (!['admin', 'superAdmin', 'user'].includes(role)) {
             return res.status(400).json({ success: false, message: 'Role không hợp lệ' });
         }
 
@@ -190,7 +199,7 @@ const updateAccount = async (req, res) => {
         }
 
         if (role) {
-            if (!['admin', 'superAdmin'].includes(role)) {
+            if (!['admin', 'superAdmin', 'user'].includes(role)) {
                 return res.status(400).json({ success: false, message: 'Role không hợp lệ' });
             }
             paramCount++;
@@ -306,7 +315,7 @@ const changeRole = async (req, res) => {
         const { id } = req.params;
         const { role } = req.body;
 
-        if (!role || !['admin', 'superAdmin'].includes(role)) {
+        if (!role || !['admin', 'superAdmin', 'user'].includes(role)) {
             return res.status(400).json({ success: false, message: 'Role không hợp lệ' });
         }
 
@@ -374,7 +383,7 @@ const getAccountProvinces = async (req, res) => {
         const result = await pool.query(
             `SELECT p.id, p.name, p.code 
              FROM provinces p
-             INNER JOIN user_provinces up ON p.id = up.province_id
+              JOIN user_provinces up ON p.id = up.province_id
              WHERE up.user_id = $1
              ORDER BY p.id`,
             [id]
@@ -465,7 +474,7 @@ const updateAccountProvinces = async (req, res) => {
             const updatedProvinces = await pool.query(
                 `SELECT p.id, p.name, p.code 
                  FROM provinces p
-                 INNER JOIN user_provinces up ON p.id = up.province_id
+                  JOIN user_provinces up ON p.id = up.province_id
                  WHERE up.user_id = $1
                  ORDER BY p.id`,
                 [id]
@@ -610,6 +619,92 @@ const removeAccountProvince = async (req, res) => {
     }
 };
 
+// Danh sách user đang chờ duyệt tỉnh thành
+const listPendingProvinceRequests = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                upr.id,
+                upr.user_id,
+                upr.province_id,
+                upr.status,
+                upr.created_at,
+                u.username,
+                u.avatar,
+                p.name AS province_name,
+                p.code AS province_code
+            FROM user_province_requests upr
+            JOIN users u ON u.id = upr.user_id
+            JOIN provinces p ON p.id = upr.province_id
+            WHERE upr.status = 'pending'
+              AND u.role = 'user'
+            ORDER BY upr.created_at ASC
+        `);
+
+        return res.json({
+            success: true,
+            data: result.rows,
+        });
+    } catch (error) {
+        console.error('listPendingProvinceRequests error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
+// Duyệt tỉnh thành user đã chọn
+const approveProvinceRequest = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const reviewerId = req.user.id;
+
+        const pendingRequest = await pool.query(
+            `SELECT id, user_id, province_id
+             FROM user_province_requests
+             WHERE user_id = $1 AND status = 'pending'
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [userId]
+        );
+
+        if (pendingRequest.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Không có yêu cầu chờ duyệt cho tài khoản này' });
+        }
+
+        const requestRow = pendingRequest.rows[0];
+
+        await pool.query('BEGIN');
+        try {
+            await pool.query('DELETE FROM user_provinces WHERE user_id = $1', [userId]);
+            await pool.query(
+                'INSERT INTO user_provinces (user_id, province_id) VALUES ($1, $2)',
+                [userId, requestRow.province_id]
+            );
+            await pool.query(
+                `UPDATE user_province_requests
+                 SET status = 'approved',
+                     reviewed_by = $1,
+                     reviewed_at = NOW(),
+                     updated_at = NOW()
+                 WHERE id = $2`,
+                [reviewerId, requestRow.id]
+            );
+
+            await pool.query('COMMIT');
+        } catch (err) {
+            await pool.query('ROLLBACK');
+            throw err;
+        }
+
+        return res.json({
+            success: true,
+            message: 'Duyệt tỉnh thành thành công',
+        });
+    } catch (error) {
+        console.error('approveProvinceRequest error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+};
+
 module.exports = {
     listAccounts,
     getAccountById,
@@ -621,5 +716,7 @@ module.exports = {
     getAccountProvinces,
     updateAccountProvinces,
     addAccountProvince,
-    removeAccountProvince
+    removeAccountProvince,
+    listPendingProvinceRequests,
+    approveProvinceRequest,
 };

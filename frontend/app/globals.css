@@ -66,6 +66,18 @@
   border: none !important;
 }
 
+/* Heatmap: Leaflet divIcon */
+.leaflet-div-icon.heatmap-alert-dot {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.leaflet-div-icon.heatmap-alert-dot > div {
+  border: none !important;
+  outline: none !important;
+  box-sizing: border-box;
+}
+
 @layer base {
   :root {
     --sidebar: oklch(0.985 0 0);

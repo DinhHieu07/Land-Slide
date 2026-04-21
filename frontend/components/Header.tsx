@@ -2,9 +2,10 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { LoginDialog } from "./LoginDialog";
-import { Button } from "./ui/button";
-import { LogOut, KeyRound } from "lucide-react";
+import { RegisterDialog } from "./RegisterDialog";
+import { LogOut, KeyRound, MapPin } from "lucide-react";
 import ChangePassword from "./ChangePassword";
+import LivingProvinceDialog from "./LivingProvinceDialog";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -15,6 +16,7 @@ import {
 export default function Header() {
     const { isAuthenticated, user, logout, login } = useAuth();
     const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+    const [provinceDialogOpen, setProvinceDialogOpen] = useState(false);
 
     return (
         <div className="flex gap-2 sm:gap-3 flex-shrink-0 items-center justify-end">
@@ -50,6 +52,13 @@ export default function Header() {
                                 <span>Đổi mật khẩu</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                                className="cursor-pointer"
+                                onClick={() => setProvinceDialogOpen(true)}
+                            >
+                                <MapPin className="mr-2 size-4" />
+                                <span>Chọn tỉnh thành sinh sống</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                                 className="cursor-pointer text-red-600 focus:text-red-600"
                                 onClick={logout}
                             >
@@ -63,10 +72,19 @@ export default function Header() {
                         open={changePasswordOpen}
                         onOpenChange={setChangePasswordOpen}
                     />
+                    <LivingProvinceDialog
+                        open={provinceDialogOpen}
+                        onOpenChange={setProvinceDialogOpen}
+                        authenticated
+                        username={user?.username}
+                        title="Cập nhật tỉnh thành sinh sống"
+                        description="Bạn có thể gửi lại lựa chọn tỉnh thành bất kỳ lúc nào. Yêu cầu sẽ ở trạng thái chờ admin duyệt."
+                    />
                 </div>
             ) : (
                 <>
                     <LoginDialog onLoginSuccess={login} />
+                    <RegisterDialog />
                 </>
             )}
         </div>

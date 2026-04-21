@@ -40,11 +40,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const roleColor: Record<Account["role"], string> = {
+    user: "bg-slate-100 text-slate-700",
     admin: "bg-blue-100 text-blue-800",
     superAdmin: "bg-purple-100 text-purple-800",
 };
 
 const roleLabel: Record<Account["role"], string> = {
+    user: "User",
     admin: "Admin",
     superAdmin: "SuperAdmin",
 };
@@ -525,7 +527,7 @@ export default function AccountManagement() {
     }
 
     // Không thể tải dữ liệu
-    if (!loadingAccounts && accountsError) {
+    if (isSuperAdmin && !loadingAccounts && accountsError) {
         return (
             <div className="p-6">
                 <div className="rounded-lg border bg-white p-6 shadow-sm">
@@ -584,13 +586,13 @@ export default function AccountManagement() {
                         </DialogHeader>
                         <div className="space-y-3">
                             <div>
-                                <Label>Tên đăng nhập</Label>
+                                <Label>Tên đăng nhập (Email)</Label>
                                 <Input
                                     value={form.username}
                                     onChange={(e) =>
                                         setForm({ ...form, username: e.target.value })
                                     }
-                                    placeholder="Nhập tên đăng nhập"
+                                    placeholder="Nhập tên đăng nhập (Email)"
                                 />
                             </div>
                             {!editing && (
@@ -618,6 +620,7 @@ export default function AccountManagement() {
                                         <SelectValue placeholder="Chọn vai trò" />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        <SelectItem value="user">Người dùng</SelectItem>
                                         <SelectItem value="admin">Quản trị viên</SelectItem>
                                         <SelectItem value="superAdmin">Siêu quản trị</SelectItem>
                                     </SelectContent>
@@ -636,14 +639,14 @@ export default function AccountManagement() {
             <div className="rounded-lg border bg-white p-4 shadow-sm">
                 <div className="flex flex-col md:flex-row md:items-end gap-3">
                     <div className="flex-1">
-                        <Label>Tìm kiếm (tên đăng nhập)</Label>
+                        <Label>Tìm kiếm theo Tên đăng nhập (Email)</Label>
                         <Input
                             value={search}
                             onChange={(e) => {
                                 setSearch(e.target.value);
                                 setPage(1);
                             }}
-                            placeholder="Nhập tên đăng nhập"
+                            placeholder="Nhập tên đăng nhập (Email)"
                         />
                     </div>
                     <div className="w-full md:w-40 space-y-1.5">
@@ -657,6 +660,7 @@ export default function AccountManagement() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="user">Người dùng</SelectItem>
                                 <SelectItem value="admin">Quản trị viên</SelectItem>
                                 <SelectItem value="superAdmin">Siêu quản trị</SelectItem>
                             </SelectContent>
@@ -678,7 +682,7 @@ export default function AccountManagement() {
                                     Người dùng
                                 </th>
                                 <th className="px-4 py-3 text-left font-semibold text-gray-700">
-                                    Tên đăng nhập
+                                    Tên đăng nhập (Email)
                                 </th>
                                 <th className="px-4 py-3 text-left font-semibold text-gray-700">
                                     Vai trò
@@ -951,6 +955,7 @@ export default function AccountManagement() {
                                     <SelectValue placeholder="Chọn vai trò" />
                                 </SelectTrigger>
                                 <SelectContent>
+                                    <SelectItem value="user">Người dùng</SelectItem>
                                     <SelectItem value="admin">Quản trị viên</SelectItem>
                                     <SelectItem value="superAdmin">Siêu quản trị</SelectItem>
                                 </SelectContent>

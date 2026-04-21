@@ -11,8 +11,8 @@ export const FIELD_NAMES: Record<string, string> = {
 
     // Các chỉ số đo lường
     threshold: "Ngưỡng cảnh báo",
-    max_threshold: "Ngưỡng tối đa",
-    min_threshold: "Ngưỡng tối thiểu",
+    danger_threshold: "Ngưỡng nguy hiểm",
+    warning_threshold: "Ngưỡng cảnh báo",
     peak_value: "Giá trị đỉnh",
     current_value: "Giá trị hiện tại",
     previous_value: "Giá trị trước đó",

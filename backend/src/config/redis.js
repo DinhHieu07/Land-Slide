@@ -62,6 +62,21 @@ const redisClient = {
         const key = `${REDIS_PREFIX}:refresh_token:${userId}`;
         await client.del(key);
     },
+
+    async setPasswordResetOtp(email, payload, ttlSeconds = 60) {
+        const key = `${REDIS_PREFIX}:password_reset_otp:${String(email).trim().toLowerCase()}`;
+        await client.setEx(key, ttlSeconds, payload);
+    },
+
+    async getPasswordResetOtp(email) {
+        const key = `${REDIS_PREFIX}:password_reset_otp:${String(email).trim().toLowerCase()}`;
+        return await client.get(key);
+    },
+
+    async deletePasswordResetOtp(email) {
+        const key = `${REDIS_PREFIX}:password_reset_otp:${String(email).trim().toLowerCase()}`;
+        await client.del(key);
+    },
 };
 
 module.exports = redisClient;

@@ -15,8 +15,8 @@ const getDashboardStats = async (req, res) => {
         if (username && !isSuperAdmin) {
             queryParams.push(username);
             deviceJoin = `
-                INNER JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
-                INNER JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${queryParams.length}
+                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${queryParams.length}
             `;
         }
 
@@ -78,9 +78,9 @@ const getDashboardStats = async (req, res) => {
         if (username && !isSuperAdmin) {
             alertsParams.push(username);
             alertsJoin = `
-                INNER JOIN devices d_alert ON a.device_id = d_alert.id
-                INNER JOIN user_provinces up_alert ON up_alert.province_id = d_alert.province_id
-                INNER JOIN users u_alert ON u_alert.id = up_alert.user_id AND u_alert.username = $${alertsParams.length}
+                 JOIN devices d_alert ON a.device_id = d_alert.id
+                 JOIN user_provinces up_alert ON up_alert.province_id = d_alert.province_id
+                 JOIN users u_alert ON u_alert.id = up_alert.user_id AND u_alert.username = $${alertsParams.length}
             `;
         }
         alertsStatsQuery += alertsJoin;
@@ -93,9 +93,9 @@ const getDashboardStats = async (req, res) => {
         if (username && !isSuperAdmin) {
             alertsByProvinceParams.push(username);
             alertsByProvinceJoin = `
-                INNER JOIN devices d_alert2 ON a.device_id = d_alert2.id
-                INNER JOIN user_provinces up_alert2 ON up_alert2.province_id = d_alert2.province_id
-                INNER JOIN users u_alert2 ON u_alert2.id = up_alert2.user_id AND u_alert2.username = $${alertsByProvinceParams.length}
+                 JOIN devices d_alert2 ON a.device_id = d_alert2.id
+                 JOIN user_provinces up_alert2 ON up_alert2.province_id = d_alert2.province_id
+                 JOIN users u_alert2 ON u_alert2.id = up_alert2.user_id AND u_alert2.username = $${alertsByProvinceParams.length}
             `;
         }
 
@@ -216,13 +216,12 @@ const getSensorStatsForDashboard = async (req, res) => {
         if (username && !isSuperAdmin) {
             queryParams.push(username);
             sensorJoin = `
-                INNER JOIN nodes n_sensor ON s.node_id = n_sensor.id
-                INNER JOIN devices d_sensor ON n_sensor.device_id = d_sensor.id
-                INNER JOIN user_provinces up_sensor ON up_sensor.province_id = d_sensor.province_id
-                INNER JOIN users u_sensor ON u_sensor.id = up_sensor.user_id AND u_sensor.username = $${queryParams.length}
+                 JOIN nodes n_sensor ON s.node_id = n_sensor.id
+                 JOIN devices d_sensor ON n_sensor.device_id = d_sensor.id
+                 JOIN user_provinces up_sensor ON up_sensor.province_id = d_sensor.province_id
+                 JOIN users u_sensor ON u_sensor.id = up_sensor.user_id AND u_sensor.username = $${queryParams.length}
             `;
         }
-
         const sql = `
             SELECT
                 ${dateTrunc} AS time_bucket,
@@ -258,8 +257,8 @@ const getSensorStatsForDashboard = async (req, res) => {
         let topDevicesJoin = '';
         if (username && !isSuperAdmin) {
             topDevicesJoin = `
-                INNER JOIN user_provinces up_top ON up_top.province_id = d.province_id
-                INNER JOIN users u_top ON u_top.id = up_top.user_id AND u_top.username = $${queryParams.length}
+                 JOIN user_provinces up_top ON up_top.province_id = d.province_id
+                 JOIN users u_top ON u_top.id = up_top.user_id AND u_top.username = $${queryParams.length}
             `;
         }
 
@@ -328,8 +327,8 @@ const getSensorStatsByDevice = async (req, res) => {
                 deviceFilter = `
                     AND EXISTS (
                         SELECT 1 FROM devices d_check
-                        INNER JOIN user_provinces up_check ON up_check.province_id = d_check.province_id
-                        INNER JOIN users u_check ON u_check.id = up_check.user_id AND u_check.username = $${queryParams.length}
+                         JOIN user_provinces up_check ON up_check.province_id = d_check.province_id
+                         JOIN users u_check ON u_check.id = up_check.user_id AND u_check.username = $${queryParams.length}
                         WHERE d_check.device_id = $2
                     )
                 `;
@@ -410,7 +409,7 @@ const getSensorStatsByDevice = async (req, res) => {
 // Thống kê dữ liệu cảm biến theo khu vực (province + area), trả về theo từng node
 const getSensorStatsByArea = async (req, res) => {
     try {
-        const { area_id, province_code, hours = 24, interval = "hour", username } = req.query;
+        const { area_id, province_code, hours = 24, interval = "day", username } = req.query;
         const userRole = req.user?.role;
         const isSuperAdmin = userRole === 'superAdmin';
 
@@ -427,47 +426,51 @@ const getSensorStatsByArea = async (req, res) => {
                 dateTrunc = "date_trunc('hour', h.recorded_at)";
         }
 
-        let permissionJoin = '';
+        let permissionJoinTemplate = '';
         let usernameParam = null;
         if (!isSuperAdmin) {
             if (!username) {
                 return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
             }
             usernameParam = username;
-            permissionJoin = `
-                INNER JOIN user_provinces up ON up.province_id = d.province_id
-                INNER JOIN users u ON u.id = up.user_id AND u.username = $__USERNAME__
+            permissionJoinTemplate = `
+                JOIN user_provinces up ON up.province_id = d.province_id
+                JOIN users u ON u.id = up.user_id AND u.username = $__USERNAME__
             `;
         }
-        
-        const runQuery = async (applyAreaFilter) => {
-            const params = [`${hours} hours`];
-            const where = [
-                `h.recorded_at >= NOW() - $1::interval`,
-                `h.recorded_at < NOW()`,
-            ];
 
+        const buildScope = (applyAreaFilter, withHours) => {
+            const params = withHours ? [`${hours} hours`] : [];
+            const where = [];
+
+            if (!withHours) {
+                where.push(`COALESCE(a.evidence_data->>'node_id', '') <> ''`);
+            }
             if (province_code) {
                 params.push(province_code);
                 where.push(`p.code = $${params.length}`);
             }
-
             if (applyAreaFilter && area_id) {
                 params.push(parseInt(area_id, 10));
                 where.push(`d.area_id = $${params.length}`);
             }
 
-            let permissionJoinResolved = permissionJoin;
+            let permissionJoinResolved = permissionJoinTemplate;
             if (usernameParam) {
                 params.push(usernameParam);
                 permissionJoinResolved = permissionJoinResolved.replace('$__USERNAME__', `$${params.length}`);
             }
+            return { params, where, permissionJoinResolved };
+        };
 
+        const runNodeSensorQuery = async (applyAreaFilter) => {
+            const { params, where, permissionJoinResolved } = buildScope(applyAreaFilter, true);
             const sql = `
                 SELECT
                     ${dateTrunc} AS time_bucket,
                     d.device_id,
                     d.name AS device_name,
+                    n.status AS node_status,
                     d.area_id,
                     COALESCE(a.name, 'Không rõ') AS area_name,
                     p.code AS province_code,
@@ -476,33 +479,79 @@ const getSensorStatsByArea = async (req, res) => {
                     s.code AS sensor_code,
                     s.name AS sensor_name,
                     s.type AS sensor_type,
-                    COUNT(*) AS count,
+                    s.warning_threshold,
+                    s.danger_threshold,
+                    COUNT(h.id) AS count,
                     AVG(h.value) AS avg_value,
                     MIN(h.value) AS min_value,
                     MAX(h.value) AS max_value
-                FROM sensor_data_history h
-                JOIN sensors s ON s.id = h.sensor_id
-                JOIN nodes n ON n.id = s.node_id
-                JOIN devices d ON d.id = n.device_id
+                FROM devices d
+                JOIN nodes n ON n.device_id = d.id
+                JOIN sensors s ON s.node_id = n.id
+                LEFT JOIN sensor_data_history h
+                    ON h.sensor_id = s.id
+                    AND h.recorded_at >= NOW() - $1::interval
+                    AND h.recorded_at < NOW()
                 LEFT JOIN provinces p ON p.id = d.province_id
                 LEFT JOIN areas a ON a.id = d.area_id
                 ${permissionJoinResolved}
-                WHERE ${where.join(' AND ')}
+                WHERE ${where.length ? where.join(' AND ') : '1=1'}
                 GROUP BY
-                    time_bucket, d.device_id, d.name, d.area_id, a.name, p.code, p.name, n.node_id, s.code, s.name, s.type
+                    time_bucket, d.device_id, d.name, n.status, d.area_id, a.name, p.code, p.name,
+                    n.node_id, s.code, s.name, s.type, s.warning_threshold, s.danger_threshold
                 ORDER BY d.device_id ASC, n.node_id ASC, s.type ASC, time_bucket ASC
             `;
             return pool.query(sql, params);
         };
 
-        let queryResult = await runQuery(true);
+        const runNodeAlertSummaryQuery = async (applyAreaFilter) => {
+            const { params, where, permissionJoinResolved } = buildScope(applyAreaFilter, false);
+            const sql = `
+                SELECT
+                    d.device_id,
+                    COALESCE(a.evidence_data->>'node_id', '') AS node_id,
+                    COUNT(*)::int AS total_alert_count,
+                    MAX(
+                        CASE
+                            WHEN a.status = 'active' AND a.severity = 'critical' THEN 3
+                            WHEN a.status = 'active' AND a.severity = 'warning' THEN 2
+                            WHEN a.status = 'active' AND a.severity = 'info' THEN 1
+                            ELSE 0
+                        END
+                    )::int AS current_alert_level
+                FROM alerts a
+                 JOIN devices d ON d.id = a.device_id
+                LEFT JOIN provinces p ON p.id = d.province_id
+                LEFT JOIN areas ar ON ar.id = d.area_id
+                ${permissionJoinResolved}
+                WHERE ${where.join(' AND ')}
+                GROUP BY d.device_id, COALESCE(a.evidence_data->>'node_id', '')
+            `;
+            return pool.query(sql, params);
+        };
+
+        let queryResult = await runNodeSensorQuery(true);
         let fallbackToProvince = false;
         if (area_id && queryResult.rows.length === 0) {
-            queryResult = await runQuery(false);
+            queryResult = await runNodeSensorQuery(false);
             fallbackToProvince = true;
         }
         const { rows } = queryResult;
 
+        let alertSummaryResult = await runNodeAlertSummaryQuery(true);
+        if (area_id && alertSummaryResult.rows.length === 0) {
+            alertSummaryResult = await runNodeAlertSummaryQuery(false);
+        }
+
+        const alertSummaryMap = {};
+        alertSummaryResult.rows.forEach((r) => {
+            const key = `${r.device_id}__${r.node_id}`;
+            alertSummaryMap[key] = {
+                total_alert_count: Number(r.total_alert_count || 0),
+                current_alert_level: Number(r.current_alert_level || 0),
+            };
+        });
+        
         const nodeMap = {};
         rows.forEach((r) => {
             const nodeKey = `${r.device_id}__${r.node_id}`;
@@ -512,10 +561,13 @@ const getSensorStatsByArea = async (req, res) => {
                     node_id: r.node_id,
                     device_id: r.device_id,
                     device_name: r.device_name || r.device_id,
+                    node_status: r.node_status || null,
                     area_id: r.area_id,
                     area_name: r.area_name,
                     province_code: r.province_code,
                     province_name: r.province_name,
+                    total_alert_count: alertSummaryMap[nodeKey]?.total_alert_count || 0,
+                    current_alert_level: alertSummaryMap[nodeKey]?.current_alert_level || 0,
                     sensors: {},
                 };
             }
@@ -526,18 +578,22 @@ const getSensorStatsByArea = async (req, res) => {
                     sensor_code: r.sensor_code,
                     sensor_name: r.sensor_name || r.sensor_code,
                     sensor_type: r.sensor_type,
+                    warning_threshold: r.warning_threshold ?? null,
+                    danger_threshold: r.danger_threshold ?? null,
                     node_id: r.node_id,
                     data: [],
                 };
             }
 
-            nodeMap[nodeKey].sensors[sensorKey].data.push({
-                time: r.time_bucket,
-                count: parseInt(r.count, 10),
-                avg_value: r.avg_value !== null ? Number(r.avg_value) : null,
-                min_value: r.min_value !== null ? Number(r.min_value) : null,
-                max_value: r.max_value !== null ? Number(r.max_value) : null,
-            });
+            if (r.time_bucket) {
+                nodeMap[nodeKey].sensors[sensorKey].data.push({
+                    time: r.time_bucket,
+                    count: parseInt(r.count, 10),
+                    avg_value: r.avg_value !== null ? Number(r.avg_value) : null,
+                    min_value: r.min_value !== null ? Number(r.min_value) : null,
+                    max_value: r.max_value !== null ? Number(r.max_value) : null,
+                });
+            }
         });
 
         const nodes = Object.values(nodeMap).map((node) => ({

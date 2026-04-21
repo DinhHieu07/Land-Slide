@@ -2,7 +2,7 @@ export interface Device {
     id: number;
     device_id: string;
     name: string;
-    status: "online" | "offline" | "disconnected" | "maintenance";
+    status: "online" | "disconnected" | "maintenance";
     lat: number;
     lon: number;
     last_seen: string;

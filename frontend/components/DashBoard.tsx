@@ -29,8 +29,6 @@ import {
     Info,
     History,
     User,
-    ChevronLeft,
-    ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -40,6 +38,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from "@/components/ui/sheet";
 import {
     BarChart as RechartsBarChart,
     Bar,
@@ -107,6 +112,8 @@ type DeviceSensorData = {
     sensor_code: string;
     sensor_name: string;
     sensor_type: string;
+    warning_threshold?: number | null;
+    danger_threshold?: number | null;
     data: Array<{
         time: string;
         count: number;
@@ -153,6 +160,9 @@ type AreaNodeData = {
     node_id: string;
     device_id: string;
     device_name: string;
+    node_status?: string | null;
+    current_alert_level?: number;
+    total_alert_count?: number;
     area_id: number | null;
     area_name: string;
     province_code: string | null;
@@ -212,6 +222,7 @@ export default function DashboardView() {
     const [areaNodeData, setAreaNodeData] = useState<AreaNodeData[]>([]);
     const [loadingAreaNodes, setLoadingAreaNodes] = useState(false);
     const [currentNodeIndex, setCurrentNodeIndex] = useState(0);
+    const [isNodeSelected, setIsNodeSelected] = useState(false);
 
     // Lấy username từ localStorage (nếu có)
     const getUsername = () => {
@@ -635,9 +646,11 @@ export default function DashboardView() {
                 method: "GET",
             });
             const data = await res.json();
+            console.log(data);
             if (res.ok && data.success) {
                 setAreaNodeData(data.nodes || []);
                 setCurrentNodeIndex(0);
+                setIsNodeSelected(false);
             } else {
                 setAreaNodeData([]);
             }
@@ -738,12 +751,48 @@ export default function DashboardView() {
 
     const currentNode = areaNodeData[currentNodeIndex] || null;
 
-    if (!isAuthenticated || !isAdmin) {
+    const getNodeLatestTime = (node: AreaNodeData): string | null => {
+        let latestMs = -1;
+        for (const sensor of node.sensors) {
+            for (const r of sensor.data || []) {
+                const t = new Date(r.time).getTime();
+                if (Number.isFinite(t) && t > latestMs) {
+                    latestMs = t;
+                }
+            }
+        }
+        return latestMs > 0 ? new Date(latestMs).toLocaleString("vi-VN") : null;
+    };
+
+    const getSensorWithDataCount = (node: AreaNodeData): number =>
+        node.sensors.filter((s) => (s.data || []).some((d) => d.count > 0)).length;
+
+    const areaNodeOverview = useMemo(() => {
+        const total = areaNodeData.length;
+        const active = areaNodeData.filter((n) => n.node_status === "online").length;
+        const maintenance = areaNodeData.filter((n) => n.node_status === "maintenance").length;
+        const disconnected = areaNodeData.filter((n) => n.node_status === "disconnected").length;
+        return { total, active, maintenance, disconnected };
+    }, [areaNodeData]);
+
+    if (!isAuthenticated) {
         return (
             <div className="p-6">
                 <Card>
                     <CardContent className="p-6">
                         <p className="text-red-600 font-semibold">Bạn cần đăng nhập để truy cập trang này.</p>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
+
+    if (!isAdmin && !isSuperAdmin) {
+        return (
+            <div className="p-6">
+                <Card>
+                    <CardContent className="p-6">
+                        <p className="text-red-600 font-semibold">Bạn cần quyền Admin hoặc SuperAdmin để truy cập trang này.</p>
                     </CardContent>
                 </Card>
             </div>
@@ -784,14 +833,8 @@ export default function DashboardView() {
                     </p>
                 </div>
             </div>
-            {/* <div className="flex gap-2 justify-end">
-                <Button onClick={() => { fetchStats(); fetchSensorStats(); fetchAlertStats(); }} variant="outline">
-                    <RefreshCw className="size-4 mr-2" />
-                    Làm mới
-                </Button>
-            </div> */}
             <div className="text-gray-800 flex items-center gap-2">
-                <Server size={20} /> Giám sát thiết bị
+                <Server size={20} /> Giám sát thiết bị (Gateway)
             </div>
             {/* Stats Cards */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -1125,18 +1168,11 @@ export default function DashboardView() {
                                             <p className="text-sm font-semibold text-slate-900 truncate">
                                                 {p.province_name || "Không rõ"}
                                             </p>
-                                            {/* <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                                Mã: {p.province_code}
-                                            </p> */}
                                         </div>
                                         <Badge variant="outline" className="bg-slate-50">
                                             {p.count} thiết bị
                                         </Badge>
                                     </div>
-                                    {/* <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
-                                        <MapPin className="size-4 text-blue-600" />
-                                        <span>Xem sơ đồ cảm biến</span>
-                                    </div> */}
                                 </button>
                             ))}
                         </div>
@@ -1287,114 +1323,285 @@ export default function DashboardView() {
                         </div>
                     )}
 
-                    {!loadingAreaNodes && currentNode && (
-                        <>
-                            <div className="rounded-lg border bg-slate-50 p-4">
-                                <div className="flex items-center justify-between gap-4">
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => setCurrentNodeIndex((prev) => (prev - 1 + areaNodeData.length) % areaNodeData.length)}
-                                        disabled={areaNodeData.length <= 1}
-                                    >
-                                        <ChevronLeft className="h-4 w-4" />
-                                    </Button>
-                                    <div className="text-center min-w-0 flex-1">
-                                        <p className="text-lg font-semibold truncate">
-                                            Node {currentNode.node_id} - {currentNode.device_name}
-                                        </p>
-                                        <p className="text-sm text-muted-foreground">
-                                            {currentNode.province_name} / {currentNode.area_name}
-                                        </p>
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            {currentNodeIndex + 1} / {areaNodeData.length} node
-                                        </p>
-                                    </div>
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => setCurrentNodeIndex((prev) => (prev + 1) % areaNodeData.length)}
-                                        disabled={areaNodeData.length <= 1}
-                                    >
-                                        <ChevronRight className="h-4 w-4" />
-                                    </Button>
+                    {!loadingAreaNodes && areaNodeData.length > 0 && (
+                        <div className="space-y-4">
+                            {/* Tổng quan */}
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                                <Card className="border-l-4 border-l-slate-500">
+                                    <CardHeader className="pb-4">
+                                        <CardDescription>Tổng node</CardDescription>
+                                        <CardTitle className="text-3xl font-bold">{areaNodeOverview.total}</CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="border-l-4 border-l-emerald-500">
+                                    <CardHeader className="pb-2">
+                                        <CardDescription>Hoạt động</CardDescription>
+                                        <CardTitle className="text-3xl font-bold text-emerald-600">{areaNodeOverview.active}</CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="border-l-4 border-l-blue-500">
+                                    <CardHeader className="pb-2">
+                                        <CardDescription>Bảo trì</CardDescription>
+                                        <CardTitle className="text-3xl font-bold text-blue-600">{areaNodeOverview.maintenance}</CardTitle>
+                                    </CardHeader>
+                                </Card>
+                                <Card className="border-l-4 border-l-red-500">
+                                    <CardHeader className="pb-2">
+                                        <CardDescription>Mất kết nối</CardDescription>
+                                        <CardTitle className="text-3xl font-bold text-red-600">{areaNodeOverview.disconnected}</CardTitle>
+                                    </CardHeader>
+                                </Card>
+                            </div>
+
+                            {/* GRID NODE */}
+                            <div>
+                                <p className="text-sm font-semibold text-slate-900 mb-2">GRID NODE (Click vào Node để xem chi tiết từng cảm biến)</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
+                                    {areaNodeData.map((n, idx) => {
+                                        const latestTime = getNodeLatestTime(n);
+                                        const sensorsWithData = getSensorWithDataCount(n);
+                                        const isSelected = idx === currentNodeIndex && isNodeSelected;
+
+                                        return (
+                                            <button
+                                                key={`${n.node_key}_${n.node_id}`}
+                                                type="button"
+                                                onClick={() => {
+                                                    setCurrentNodeIndex(idx);
+                                                    setIsNodeSelected(true);
+                                                }}
+                                                className={cn(
+                                                    "rounded-lg border p-3 text-left bg-white hover:bg-slate-50 transition cursor-pointer",
+                                                    isSelected && "border-blue-500 bg-blue-50"
+                                                )}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-semibold text-slate-900 truncate">
+                                                            Node {n.node_id}
+                                                        </p>
+                                                        <p className="text-xs text-muted-foreground truncate">
+                                                            {n.device_name} • {n.province_name}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Badge variant="outline" className="bg-white">
+                                                            Số cảm biến: {n.sensors.length}
+                                                        </Badge>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-2 space-y-2">
+                                                    <span className={cn(
+                                                        "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px]",
+                                                        n.node_status === "online"
+                                                            ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                                                            : n.node_status === "disconnected"
+                                                                ? "border-red-100 bg-red-50 text-red-700"
+                                                                : n.node_status === "maintenance"
+                                                                    ? "border-blue-100 bg-blue-50 text-blue-700"
+                                                                    : "border-gray-100 bg-gray-50 text-gray-700"
+                                                    )}>
+                                                        <Radio className="size-3" />
+                                                        {n.node_status === "online"
+                                                            ? "Hoạt động"
+                                                            : n.node_status === "disconnected"
+                                                                ? "Mất kết nối"
+                                                                : n.node_status === "maintenance"
+                                                                    ? "Bảo trì"
+                                                                    : "Không xác định"}
+                                                    </span>
+
+                                                    <span className="inline-flex items-center gap-1 rounded-md border border-slate-100 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
+                                                        <Clock className="size-3" />
+                                                        {latestTime ? `Dữ liệu gần nhất: ${latestTime}` : "Chưa có dữ liệu 24h"}
+                                                    </span>
+
+                                                    <span className="inline-flex items-center gap-1 rounded-md border border-indigo-100 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700">
+                                                        <Info className="size-3" />
+                                                        {sensorsWithData}/{n.sensors.length} cảm biến có dữ liệu trong 24h
+                                                    </span>
+
+                                                    <div>
+                                                        <span className={cn(
+                                                            "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px]",
+                                                            (n.current_alert_level || 0) >= 3
+                                                                ? "border-red-100 bg-red-50 text-red-700"
+                                                                : (n.current_alert_level || 0) >= 2
+                                                                    ? "border-amber-100 bg-amber-50 text-amber-700"
+                                                                    : (n.current_alert_level || 0) >= 1
+                                                                        ? "border-blue-100 bg-blue-50 text-blue-700"
+                                                                        : "border-emerald-100 bg-emerald-50 text-emerald-700"
+                                                        )}>
+                                                            <AlertTriangle className="size-3" />
+                                                            Mức cảnh báo: {(n.current_alert_level || 0) >= 3
+                                                                ? "Nguy hiểm"
+                                                                : (n.current_alert_level || 0) >= 2
+                                                                    ? "Cảnh báo"
+                                                                    : (n.current_alert_level || 0) >= 1
+                                                                        ? "Thông tin"
+                                                                        : "Bình thường"}
+                                                        </span>
+
+                                                        <span className="inline-flex items-center gap-1 rounded-md border border-slate-100 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
+                                                            <History className="size-3" />
+                                                            Tổng cảnh báo quá khứ: {n.total_alert_count || 0}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                                {currentNode.sensors.map((sensor) => {
-                                    const sortedData = [...sensor.data].sort(
-                                        (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
-                                    );
-                                    const chartData = sortedData.slice(-24).map((d) => {
-                                        const date = new Date(d.time);
-                                        return {
-                                            time: `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`,
-                                            "Giá trị TB": d.avg_value || 0,
-                                            Min: d.min_value || 0,
-                                            Max: d.max_value || 0,
-                                        };
-                                    });
+                            {/* Drawer bên phải */}
+                            <Sheet
+                                open={isNodeSelected}
+                                onOpenChange={(open) => {
+                                    setIsNodeSelected(open);
+                                }}
+                            >
+                                <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto">
+                                    <SheetHeader>
+                                        <SheetTitle>
+                                            {currentNode ? `Node ${currentNode.node_id}` : "Node"}
+                                        </SheetTitle>
+                                        <SheetDescription>
+                                            {currentNode
+                                                ? `${currentNode.device_name} • ${currentNode.province_name} / ${currentNode.area_name}`
+                                                : "Chưa có Node được chọn"}
+                                        </SheetDescription>
+                                    </SheetHeader>
 
-                                    const unitMap: Record<string, string> = {
-                                        rainfall_24h: "mm",
-                                        soil_moisture: "%",
-                                        vibration_g: "g",
-                                        tilt_deg: "°",
-                                        slope_deg: "°",
-                                    };
-                                    const unit = unitMap[sensor.sensor_type] || "";
-                                    const colorMap: Record<string, string> = {
-                                        rainfall_24h: "hsl(221.2 83.2% 53.3%)",
-                                        soil_moisture: "hsl(142.1 76.2% 36.3%)",
-                                        vibration_g: "hsl(0 84.2% 60.2%)",
-                                        tilt_deg: "hsl(262.1 83.3% 57.8%)",
-                                        slope_deg: "hsl(43.3 96.4% 56.3%)",
-                                    };
-                                    const lineColor = colorMap[sensor.sensor_type] || "hsl(221.2 83.2% 53.3%)";
-                                    const chartConfig = {
-                                        "Giá trị TB": { label: "Giá trị TB", color: lineColor },
-                                        Min: { label: "Min", color: "hsl(0 0% 70%)" },
-                                        Max: { label: "Max", color: "hsl(0 0% 70%)" },
-                                    };
-
-                                    return (
-                                        <div key={`${currentNode.node_key}_${sensor.sensor_code}_${sensor.sensor_type}`} className="space-y-3 rounded-lg border p-3">
-                                            <div className="flex items-center gap-2">
-                                                {sensor.sensor_type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
-                                                {sensor.sensor_type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
-                                                {sensor.sensor_type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
-                                                {sensor.sensor_type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
-                                                {sensor.sensor_type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
-                                                <div>
-                                                    <span className="text-base font-semibold text-slate-900">{sensor.sensor_name}</span>
-                                                    <span className="text-xs text-muted-foreground ml-2">({sensor.sensor_code})</span>
-                                                </div>
+                                    {currentNode ? (
+                                        <div className="space-y-6">
+                                            <div className="text-sm text-muted-foreground ml-4">
+                                                4 biểu đồ cảm biến trong 24h
                                             </div>
-                                            {chartData.length === 0 ? (
-                                                <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
-                                                    Chưa có dữ liệu trong 24h
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-2">
-                                                    <ChartContainer config={chartConfig} className="h-72 w-full">
-                                                        <LineChart data={chartData}>
-                                                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                                                            <XAxis dataKey="time" tickLine={false} axisLine={false} tickMargin={8} className="text-xs" />
-                                                            <YAxis tickLine={false} axisLine={false} tickMargin={8} className="text-xs" />
-                                                            <ChartTooltip
-                                                                content={<ChartTooltipContent formatter={(value) => `${Number(value).toFixed(2)} ${unit}`} />}
-                                                            />
-                                                            <Line type="monotone" dataKey="Giá trị TB" stroke={lineColor} strokeWidth={2} dot={false} />
-                                                        </LineChart>
-                                                    </ChartContainer>
-                                                </div>
-                                            )}
+                                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 ml-4 mr-4">
+                                                {currentNode.sensors.map((sensor) => {
+                                                    const sortedData = [...sensor.data].sort(
+                                                        (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+                                                    );
+                                                    const chartData = sortedData.slice(-24).map((d) => {
+                                                        const date = new Date(d.time);
+                                                        return {
+                                                            time: `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} ${date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`,
+                                                            "Giá trị TB": d.avg_value || 0,
+                                                            Min: d.min_value || 0,
+                                                            Max: d.max_value || 0,
+                                                        };
+                                                    });
+
+                                                    let max24: number | null = null;
+                                                    sortedData.forEach((d) => {
+                                                        if (d.max_value !== null && d.max_value !== undefined) {
+                                                            const v = Number(d.max_value);
+                                                            if (Number.isFinite(v)) {
+                                                                max24 = max24 === null ? v : Math.max(max24, v);
+                                                            }
+                                                        }
+                                                    });
+
+                                                    const unitMap: Record<string, string> = {
+                                                        rainfall: "%",
+                                                        soil_moisture: "%",
+                                                        vibration: "lần trong 2s",
+                                                        tilt: "°"
+                                                    };
+                                                    const unit = unitMap[sensor.sensor_type] || "";
+                                                    const colorMap: Record<string, string> = {
+                                                        rainfall_24h: "hsl(221.2 83.2% 53.3%)",
+                                                        soil_moisture: "hsl(142.1 76.2% 36.3%)",
+                                                        vibration_g: "hsl(0 84.2% 60.2%)",
+                                                        tilt_deg: "hsl(262.1 83.3% 57.8%)",
+                                                        slope_deg: "hsl(43.3 96.4% 56.3%)",
+                                                    };
+                                                    const lineColor = colorMap[sensor.sensor_type] || "hsl(221.2 83.2% 53.3%)";
+                                                    const chartConfig = {
+                                                        "Giá trị TB": { label: "Giá trị TB", color: lineColor },
+                                                        Min: { label: "Min", color: "hsl(0 0% 70%)" },
+                                                        Max: { label: "Max", color: "hsl(0 0% 70%)" },
+                                                    };
+
+                                                    return (
+                                                        <div
+                                                            key={`${currentNode.node_key}_${sensor.sensor_code}_${sensor.sensor_type}`}
+                                                            className="space-y-3 rounded-lg border p-3"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                {sensor.sensor_type === "rainfall_24h" && <CloudRain className="h-5 w-5 text-blue-600" />}
+                                                                {sensor.sensor_type === "soil_moisture" && <Droplets className="h-5 w-5 text-emerald-600" />}
+                                                                {sensor.sensor_type === "vibration_g" && <Activity className="h-5 w-5 text-red-600" />}
+                                                                {sensor.sensor_type === "tilt_deg" && <Cpu className="h-5 w-5 text-indigo-600" />}
+                                                                {sensor.sensor_type === "slope_deg" && <Gauge className="h-5 w-5 text-amber-600" />}
+                                                                <div>
+                                                                    <span className="text-base font-semibold text-slate-900">
+                                                                        {sensor.sensor_name}
+                                                                    </span>
+                                                                    <span className="text-xs text-muted-foreground ml-2">
+                                                                        ({sensor.sensor_code})
+                                                                    </span>
+                                                                    <div className="mt-1 space-x-2 text-[11px] text-muted-foreground">
+                                                                        <span>
+                                                                            Max trong 24h:{" "}
+                                                                            {max24 === null
+                                                                                ? "—"
+                                                                                : `${(max24 as number).toFixed(2)} ${unit}`}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="max-h-[80vh] overflow-y-auto">
+                                                                {chartData.length === 0 ? (
+                                                                    <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg">
+                                                                        Chưa có dữ liệu trong 24h
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="space-y-2">
+                                                                        <ChartContainer config={chartConfig} className="h-72 w-full">
+                                                                            <LineChart data={chartData}>
+                                                                                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                                                                                <XAxis
+                                                                                    dataKey="time"
+                                                                                    tickLine={false}
+                                                                                    axisLine={false}
+                                                                                    tickMargin={8}
+                                                                                    className="text-xs"
+                                                                                />
+                                                                                <YAxis
+                                                                                    tickLine={false}
+                                                                                    axisLine={false}
+                                                                                    tickMargin={8}
+                                                                                    className="text-xs"
+                                                                                />
+                                                                                <ChartTooltip
+                                                                                    content={<ChartTooltipContent formatter={(value) => `${Number(value).toFixed(2)} ${unit}`} />}
+                                                                                />
+                                                                                <Line
+                                                                                    type="monotone"
+                                                                                    dataKey="Giá trị TB"
+                                                                                    stroke={lineColor}
+                                                                                    strokeWidth={2}
+                                                                                    dot={false}
+                                                                                />
+                                                                            </LineChart>
+                                                                        </ChartContainer>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        </>
+                                    ) : (
+                                        <div className="text-sm text-muted-foreground">Chưa có dữ liệu.</div>
+                                    )}
+                                </SheetContent>
+                            </Sheet>
+                        </div>
                     )}
                 </CardContent>
             </Card>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Dict, Optional
@@ -14,6 +15,12 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent
 
 load_dotenv(ROOT / ".env")
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("ml-service")
 
 ARTIFACTS_DIR = Path(os.getenv("ML_ARTIFACTS_DIR", str(ROOT / "artifacts")))
 MODEL_PATH = ARTIFACTS_DIR / "alert_rf.joblib"
@@ -76,10 +83,19 @@ runtime = ModelRuntime()
 
 @app.on_event("startup")
 def on_startup() -> None:
-    runtime.load()
+    logger.info("Starting ML service")
+    logger.info("Model path: %s", MODEL_PATH)
+    logger.info("Label map path: %s", LABEL_MAP_PATH)
+    try:
+        runtime.load()
+        logger.info("Model loaded successfully. features=%s", runtime.features)
+    except Exception:
+        logger.exception("Failed to load model on startup")
+        raise
 
 @app.get("/health")
 def health() -> dict:
+    logger.info("Health check called. model_ready=%s", runtime.pipeline is not None)
     return {
         "ok": runtime.pipeline is not None,
         "model_path": str(MODEL_PATH),
@@ -90,8 +106,16 @@ def health() -> dict:
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest) -> PredictResponse:
     try:
-        return runtime.predict(req)
+        result = runtime.predict(req)
+        logger.info(
+            "Prediction success. label=%s probs=%s",
+            result.predicted_label,
+            result.probabilities,
+        )
+        return result
     except RuntimeError as err:
+        logger.warning("Prediction runtime error: %s", err)
         raise HTTPException(status_code=400, detail=str(err)) from err
     except Exception as err:  # pragma: no cover
+        logger.exception("Prediction unexpected error")
         raise HTTPException(status_code=500, detail=f"Prediction error: {err}") from err

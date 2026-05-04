@@ -58,15 +58,19 @@ const getGatewayByCodeWithPermission = async (gatewayDeviceId, req) => {
 /** Danh sách node + gateway cho bản đồ */
 const listNodesForMap = async (req, res) => {
     try {
-        const { username } = req.query;
+        const queryUsername = req.query?.username;
         const userRole = req.user?.role;
         const isSuperAdmin = userRole === 'superAdmin';
+        const requesterUsername = req.user?.username || queryUsername;
 
         let usernameJoin = '';
         const values = [];
 
-        if (username && !isSuperAdmin) {
-            values.push(username);
+        if (!isSuperAdmin) {
+            if (!requesterUsername) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            values.push(requesterUsername);
             usernameJoin = `
                  JOIN user_provinces up ON up.province_id = d.province_id
                  JOIN users u_filter ON u_filter.id = up.user_id AND u_filter.username = $${values.length}

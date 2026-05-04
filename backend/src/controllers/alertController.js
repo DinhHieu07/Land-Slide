@@ -26,13 +26,13 @@ function getHeatmapWeight(row) {
 // Danh sách cảnh báo với filter và pagination
 const listAlerts = async (req, res) => {
     try {
-        const { 
+        const {
             search = '', 
             severity, 
             status, 
             category,
             deviceId,
-            username,
+            username: queryUsername,
             start_date,
             end_date,
             limit = 10, 
@@ -81,9 +81,13 @@ const listAlerts = async (req, res) => {
         let usernameJoin = '';
         const userRole = req.user?.role;
         const isSuperAdmin = userRole === 'superAdmin';
+        const requesterUsername = req.user?.username || queryUsername;
         
-        if (username && !isSuperAdmin) {
-            values.push(username);
+        if (!isSuperAdmin) {
+            if (!requesterUsername) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            values.push(requesterUsername);
             usernameJoin = `
                  JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
                  JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${values.length}
@@ -180,6 +184,23 @@ const listAlerts = async (req, res) => {
 const getAlertById = async (req, res) => {
     try {
         const { id } = req.params;
+        const userRole = req.user?.role;
+        const isSuperAdmin = userRole === 'superAdmin';
+        const requesterUsername = req.user?.username;
+
+        const values = [id];
+        let permissionJoin = '';
+        if (!isSuperAdmin) {
+            if (!requesterUsername) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            values.push(requesterUsername);
+            permissionJoin = `
+                JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $2
+            `;
+        }
+
         const query = `
             SELECT 
                 a.*,
@@ -197,9 +218,10 @@ const getAlertById = async (req, res) => {
             LEFT JOIN provinces p ON d.province_id = p.id
             LEFT JOIN users u ON a.resolved_by = u.id
             LEFT JOIN sensors s ON a.sensor_id = s.id
+            ${permissionJoin}
             WHERE a.id = $1
         `;
-        const result = await pool.query(query, [id]);
+        const result = await pool.query(query, values);
         if (!result.rows.length) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy cảnh báo' });
         }
@@ -394,16 +416,20 @@ const createAlert = async (req, res) => {
 // Thống kê alerts
 const getAlertStats = async (req, res) => {
     try {
-        const { username } = req.query;
+        const queryUsername = req.query?.username;
         
         // superAdmin có thể xem tất cả alerts
         let usernameJoin = '';
         let values = [];
         const userRole = req.user?.role;
         const isSuperAdmin = userRole === 'superAdmin';
+        const requesterUsername = req.user?.username || queryUsername;
         
-        if (username && !isSuperAdmin) {
-            values.push(username);
+        if (!isSuperAdmin) {
+            if (!requesterUsername) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            values.push(requesterUsername);
             usernameJoin = `
                  JOIN devices d ON a.device_id = d.id
                  JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
@@ -445,10 +471,11 @@ const getEvidenceData = async (req, res) => {
 /** Điểm nhiệt theo cảnh báo active (bản đồ) */
 const getAlertHeatmap = async (req, res) => {
     try {
-        const { username, hours = '24', type = 'all' } = req.query;
+        const { hours = '24', type = 'all' } = req.query;
         const h = Math.min(168, Math.max(1, parseInt(String(hours), 10) || 24));
         const userRole = req.user?.role;
         const isSuperAdmin = userRole === 'superAdmin';
+        const requesterUsername = req.user?.username || req.query?.username;
 
         const params = [`${h} hours`];
         const where = [
@@ -458,10 +485,10 @@ const getAlertHeatmap = async (req, res) => {
 
         let permissionJoin = '';
         if (!isSuperAdmin) {
-            if (!username) {
+            if (!requesterUsername) {
                 return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
             }
-            params.push(username);
+            params.push(requesterUsername);
             permissionJoin = `
                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${params.length}

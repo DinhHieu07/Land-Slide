@@ -16,6 +16,21 @@ const getAlertHistory = async (req, res) => {
         const conditions = [];
         const values = [];
         let paramCount = 0;
+        const isSuperAdmin = req.user?.role === 'superAdmin';
+        const requesterUsername = req.user?.username;
+
+        let permissionJoin = '';
+        if (!isSuperAdmin) {
+            if (!requesterUsername) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            paramCount++;
+            values.push(requesterUsername);
+            permissionJoin = `
+                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${paramCount}
+            `;
+        }
 
         if (start_date) {
             paramCount++;
@@ -55,7 +70,14 @@ const getAlertHistory = async (req, res) => {
         values.push(parseInt(offset) || 0);
 
         // Lấy tổng số để pagination
-        const countQuery = `SELECT COUNT(*) as total FROM alerts a LEFT JOIN landslide_events e ON a.event_id = e.id ${whereClause}`;
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM alerts a
+            LEFT JOIN landslide_events e ON a.event_id = e.id
+            LEFT JOIN devices d ON a.device_id = d.id
+            ${permissionJoin}
+            ${whereClause}
+        `;
         const countResult = await pool.query(countQuery, values.slice(0, -2));
         const total = parseInt(countResult.rows[0].total);
 
@@ -71,6 +93,8 @@ const getAlertHistory = async (req, res) => {
                 e.severity as event_severity
             FROM alerts a
             LEFT JOIN landslide_events e ON a.event_id = e.id
+            LEFT JOIN devices d ON a.device_id = d.id
+            ${permissionJoin}
             ${whereClause}
             ORDER BY id DESC
             LIMIT $${paramCount - 1} OFFSET $${paramCount}
@@ -110,6 +134,21 @@ const getSensorDataHistory = async (req, res) => {
         const conditions = [];
         const values = [];
         let paramCount = 0;
+        const isSuperAdmin = req.user?.role === 'superAdmin';
+        const requesterUsername = req.user?.username;
+
+        let permissionJoin = '';
+        if (!isSuperAdmin) {
+            if (!requesterUsername) {
+                return res.status(403).json({ success: false, message: 'Không có quyền truy cập' });
+            }
+            paramCount++;
+            values.push(requesterUsername);
+            permissionJoin = `
+                 JOIN user_provinces up_filter ON up_filter.province_id = d.province_id
+                 JOIN users u_filter ON u_filter.id = up_filter.user_id AND u_filter.username = $${paramCount}
+            `;
+        }
 
         if (device_id) {
             paramCount++;
@@ -155,6 +194,7 @@ const getSensorDataHistory = async (req, res) => {
             JOIN sensors s ON s.id = h.sensor_id
             JOIN nodes n ON n.id = s.node_id
             JOIN devices d ON d.id = n.device_id
+            ${permissionJoin}
             ${whereClause}
         `;
         const countResult = await pool.query(countQuery, values.slice(0, -2));
@@ -177,6 +217,7 @@ const getSensorDataHistory = async (req, res) => {
             JOIN sensors s ON s.id = h.sensor_id
             JOIN nodes n ON n.id = s.node_id
             JOIN devices d ON d.id = n.device_id
+            ${permissionJoin}
             ${whereClause}
             ORDER BY h.recorded_at DESC
             LIMIT $${paramCount - 1} OFFSET $${paramCount}

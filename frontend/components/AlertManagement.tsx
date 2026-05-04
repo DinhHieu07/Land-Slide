@@ -66,6 +66,7 @@ const categoryLabels: Record<Alert["category"], string> = {
 
 export default function AlertManagement() {
     const { isAuthenticated, isAdmin, isSuperAdmin, loading } = useAuth();
+    const canManageAlerts = isAdmin || isSuperAdmin;
     const { socket, isConnected } = useSocket();
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [stats, setStats] = useState<AlertStats | null>(null);
@@ -211,11 +212,11 @@ export default function AlertManagement() {
     };
 
     useEffect(() => {
-        if (isAuthenticated && isAdmin) {
+        if (isAuthenticated) {
             fetchAlerts();
             fetchStats();
         }
-    }, [isAuthenticated, isAdmin, debouncedSearch, page, severity, status, category]);
+    }, [isAuthenticated, debouncedSearch, page, severity, status, category]);
 
     useEffect(() => {
         setPage(1);
@@ -308,15 +309,6 @@ export default function AlertManagement() {
         );
     }
 
-    if (!isAdmin && !isSuperAdmin) {
-        return (
-            <div className="p-6">
-                <div className="rounded-lg border bg-white p-6 shadow-sm">
-                    <p className="text-red-600 font-semibold">Bạn cần quyền Admin hoặc SuperAdmin để truy cập trang này.</p>
-                </div>
-            </div>
-        );
-    }
     return (
         <div className="space-y-6 p-6">
             {/* Header */}
@@ -388,7 +380,7 @@ export default function AlertManagement() {
             )}
 
             {/* Khu vực Cần xử lý ngay */}
-            {criticalAlerts.length > 0 && (
+            {canManageAlerts && criticalAlerts.length > 0 && (
                 <Card className="border-2 border-red-300 bg-red-50/50 shadow-lg">
                     <CardHeader className="bg-red-100/50 border-b border-red-200">
                         <CardTitle className="flex items-center gap-2 text-red-700 text-xl">
@@ -433,18 +425,20 @@ export default function AlertManagement() {
                                             <Eye className="size-4 mr-1" />
                                             Chi tiết
                                         </Button>
-                                        <Button
-                                            variant="default"
-                                            size="sm"
-                                            onClick={() => {
-                                                setUpdatingAlert(alert);
-                                                setNewStatus("acknowledged");
-                                                setUpdateStatusOpen(true);
-                                            }}
-                                            className="bg-red-600 hover:bg-red-700 text-white font-semibold"
-                                        >
-                                            Xử lý ngay
-                                        </Button>
+                                        {canManageAlerts && (
+                                            <Button
+                                                variant="default"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setUpdatingAlert(alert);
+                                                    setNewStatus("acknowledged");
+                                                    setUpdateStatusOpen(true);
+                                                }}
+                                                className="bg-red-600 hover:bg-red-700 text-white font-semibold"
+                                            >
+                                                Xử lý ngay
+                                            </Button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -604,7 +598,7 @@ export default function AlertManagement() {
                                             <Eye className="size-4 mr-1" />
                                             Chi tiết
                                         </Button>
-                                        {alert.status !== "resolved" && (
+                                        {canManageAlerts && alert.status !== "resolved" && (
                                             <Button
                                                 variant={alert.status === "active" ? "default" : "outline"}
                                                 size="sm"
@@ -775,54 +769,55 @@ export default function AlertManagement() {
                 </DialogContent>
             </Dialog>
 
-            {/* Update Status Dialog */}
-            <Dialog open={updateStatusOpen} onOpenChange={setUpdateStatusOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Cập nhật trạng thái</DialogTitle>
-                        <DialogDescription>
-                            Cập nhật trạng thái cho cảnh báo: {updatingAlert?.title}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                        <div>
-                            <Label>Trạng thái mới</Label>
-                            <Select
-                                value={newStatus}
-                                onValueChange={(value) => setNewStatus(value as Alert["status"])}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="active">Chưa xử lý</SelectItem>
-                                    <SelectItem value="acknowledged">Đã xác nhận</SelectItem>
-                                    <SelectItem value="resolved">Đã xử lý</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        {newStatus === "resolved" && (
+            {canManageAlerts && (
+                <Dialog open={updateStatusOpen} onOpenChange={setUpdateStatusOpen}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Cập nhật trạng thái</DialogTitle>
+                            <DialogDescription>
+                                Cập nhật trạng thái cho cảnh báo: {updatingAlert?.title}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
                             <div>
-                                <Label>Ghi chú xử lý</Label>
-                                <Textarea
-                                    value={resolvedNote}
-                                    onChange={(e) => setResolvedNote(e.target.value)}
-                                    placeholder="Nhập ghi chú về cách xử lý..."
-                                    rows={4}
-                                />
+                                <Label>Trạng thái mới</Label>
+                                <Select
+                                    value={newStatus}
+                                    onValueChange={(value) => setNewStatus(value as Alert["status"])}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="active">Chưa xử lý</SelectItem>
+                                        <SelectItem value="acknowledged">Đã xác nhận</SelectItem>
+                                        <SelectItem value="resolved">Đã xử lý</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
-                        )}
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setUpdateStatusOpen(false)}>
-                            Hủy
-                        </Button>
-                        <Button onClick={handleUpdateStatus} disabled={isUpdating}>
-                            {isUpdating ? "Đang cập nhật..." : "Cập nhật"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                            {newStatus === "resolved" && (
+                                <div>
+                                    <Label>Ghi chú xử lý</Label>
+                                    <Textarea
+                                        value={resolvedNote}
+                                        onChange={(e) => setResolvedNote(e.target.value)}
+                                        placeholder="Nhập ghi chú về cách xử lý..."
+                                        rows={4}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setUpdateStatusOpen(false)}>
+                                Hủy
+                            </Button>
+                            <Button onClick={handleUpdateStatus} disabled={isUpdating}>
+                                {isUpdating ? "Đang cập nhật..." : "Cập nhật"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
 
             <Toast
                 open={toastOpen}

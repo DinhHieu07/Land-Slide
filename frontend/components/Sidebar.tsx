@@ -21,6 +21,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 export default function AppSidebar() {
     const { isAdmin, isSuperAdmin, isAuthenticated, user, logout } = useAuth();
+    const isUserOnly = isAuthenticated && !isAdmin;
     return (
         <Sidebar>
             <SidebarHeader className="px-4 py-4 border-b border-gray-200">
@@ -43,16 +44,16 @@ export default function AppSidebar() {
                 <SidebarGroup>
                     <SidebarGroupContent>
                         <SidebarMenu>
-                            <SidebarMenuItem>
-                                <SidebarMenuButton asChild>
-                                    <Link href="/">
-                                        <LayoutDashboard className="size-4" />
-                                        Tổng quan
-                                    </Link>
-                                </SidebarMenuButton>
-                            </SidebarMenuItem>
-                            <SidebarGroupLabel>Giám sát</SidebarGroupLabel>
-                            {isAuthenticated && (
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton asChild>
+                                        <Link href="/">
+                                            <LayoutDashboard className="size-4" />
+                                            Tổng quan
+                                        </Link>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            <SidebarGroupLabel>{isUserOnly ? "Chức năng người dùng" : "Giám sát"}</SidebarGroupLabel>
+                            {isAuthenticated && !isUserOnly && (
                                 <SidebarMenuItem>
                                     <SidebarMenuButton asChild>
                                         <Link href="/dashboard">
@@ -72,7 +73,6 @@ export default function AppSidebar() {
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             )}
-                            <SidebarGroupLabel>Quản lý thiết bị và dữ liệu</SidebarGroupLabel>
                             <SidebarMenuItem>
                                 <SidebarMenuButton asChild>
                                     <Link href="/map">
@@ -81,7 +81,7 @@ export default function AppSidebar() {
                                     </Link>
                                 </SidebarMenuButton>
                             </SidebarMenuItem>
-                            {isAuthenticated && (
+                            {isAuthenticated && !isUserOnly && (
                                 <>
                                     {/* <SidebarMenuItem>
                                         <SidebarMenuButton asChild>
@@ -101,7 +101,7 @@ export default function AppSidebar() {
                                     </SidebarMenuItem>
                                 </>
                             )}
-                            {isAuthenticated && (
+                            {isAuthenticated && !isUserOnly && (
                                 <SidebarMenuItem>
                                     <SidebarMenuButton asChild>
                                         <Link href="/history">
@@ -112,7 +112,7 @@ export default function AppSidebar() {
                                 </SidebarMenuItem>
                             )}
                             
-                            {isAdmin && (
+                            {isAdmin && !isUserOnly && (
                                 <>
                                     <SidebarGroupLabel>Quản trị người dùng</SidebarGroupLabel>
                                     {isSuperAdmin && (

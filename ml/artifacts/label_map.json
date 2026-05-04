@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "features": [
+    "rain_percent",
+    "soil_moisture",
+    "tilt_angle",
+    "vibration_count",
+    "rain_warning_elapsed_sec",
+    "rain_danger_elapsed_sec"
+  ],
+  "labels": [
+    "SAFE",
+    "WARNING",
+    "DANGER"
+  ],
+  "trained_at_utc": "2026-05-04T11:35:26.307482+00:00",
+  "sklearn_version": "1.5.2",
+  "include_rain_elapsed": true
+}

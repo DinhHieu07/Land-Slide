@@ -1,0 +1,140 @@
+{
+  "trained_at_utc": "2026-05-04T11:35:26.307482+00:00",
+  "n_rows_total": 7673,
+  "n_train": 5371,
+  "n_val": 1150,
+  "n_test": 1152,
+  "split": "temporal",
+  "train_ratio": 0.7,
+  "val_ratio": 0.15,
+  "features": [
+    "rain_percent",
+    "soil_moisture",
+    "tilt_angle",
+    "vibration_count",
+    "rain_warning_elapsed_sec",
+    "rain_danger_elapsed_sec"
+  ],
+  "hyperparameters": {
+    "n_estimators": 200,
+    "max_depth": 12,
+    "min_samples_leaf": 4,
+    "class_weight": "balanced"
+  },
+  "validation": {
+    "classification_report": {
+      "SAFE": {
+        "precision": 0.9946524064171123,
+        "recall": 1.0,
+        "f1-score": 0.9973190348525469,
+        "support": 372.0
+      },
+      "WARNING": {
+        "precision": 1.0,
+        "recall": 0.9957627118644068,
+        "f1-score": 0.9978768577494692,
+        "support": 472.0
+      },
+      "DANGER": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 306.0
+      },
+      "accuracy": 0.9982608695652174,
+      "macro avg": {
+        "precision": 0.9982174688057041,
+        "recall": 0.9985875706214689,
+        "f1-score": 0.9983986308673387,
+        "support": 1150.0
+      },
+      "weighted avg": {
+        "precision": 0.9982701697279702,
+        "recall": 0.9982608695652174,
+        "f1-score": 0.9982613546286061,
+        "support": 1150.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        372,
+        0,
+        0
+      ],
+      [
+        2,
+        470,
+        0
+      ],
+      [
+        0,
+        0,
+        306
+      ]
+    ],
+    "confusion_matrix_labels": [
+      "SAFE",
+      "WARNING",
+      "DANGER"
+    ]
+  },
+  "test": {
+    "classification_report": {
+      "SAFE": {
+        "precision": 1.0,
+        "recall": 0.9894957983193278,
+        "f1-score": 0.9947201689545935,
+        "support": 476.0
+      },
+      "WARNING": {
+        "precision": 0.9947368421052631,
+        "recall": 0.9982394366197183,
+        "f1-score": 0.9964850615114236,
+        "support": 568.0
+      },
+      "DANGER": {
+        "precision": 0.972972972972973,
+        "recall": 1.0,
+        "f1-score": 0.9863013698630136,
+        "support": 108.0
+      },
+      "accuracy": 0.9947916666666666,
+      "macro avg": {
+        "precision": 0.9892366050260787,
+        "recall": 0.9959117449796819,
+        "f1-score": 0.9925022001096769,
+        "support": 1152.0
+      },
+      "weighted avg": {
+        "precision": 0.9948711869764499,
+        "recall": 0.9947916666666666,
+        "f1-score": 0.9948010966198617,
+        "support": 1152.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        471,
+        3,
+        2
+      ],
+      [
+        0,
+        567,
+        1
+      ],
+      [
+        0,
+        0,
+        108
+      ]
+    ],
+    "confusion_matrix_labels": [
+      "SAFE",
+      "WARNING",
+      "DANGER"
+    ]
+  },
+  "model_path": "D:\\LandSlide\\ml\\artifacts\\alert_rf.joblib",
+  "sklearn_version": "1.5.2"
+}

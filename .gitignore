@@ -65,3 +65,4 @@ frontend/KICH_BAN_BAO_CAO.md
 ml/.venv/
 ml/artifacts/
 ml/__pycache__/
+ml/.env

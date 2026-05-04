@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const pool = require('../config/db');
 const { sendAlertEmail } = require('./emailService');
+const { getAlertRecipientEmailsByProvince } = require('./alertRecipientsService');
 
 let io = null;
 let monitorInterval = null;
@@ -146,51 +147,9 @@ const createOfflineAlert = async (device) => {
         let recipientEmails = [];
         if (fullAlert.province_id) {
             try {
-                const emailDomain = process.env.EMAIL_DOMAIN || 'landslide-monitoring.com';
-                const managersQuery = `
-                    SELECT DISTINCT 
-                        u.id, u.username, u.role,
-                        CASE 
-                            WHEN u.email IS NOT NULL AND u.email LIKE '%@%' THEN u.email
-                            ELSE u.username || '@' || $1::text
-                        END as email
-                    FROM users u
-                     JOIN user_provinces up ON u.id = up.user_id
-                    WHERE up.province_id = $2
-                    UNION
-                    SELECT 
-                        id, username, role,
-                        CASE 
-                            WHEN email IS NOT NULL AND email LIKE '%@%' THEN email
-                            ELSE username || '@' || $1::text
-                        END as email
-                    FROM users
-                    WHERE role = 'superAdmin'
-                `;
-                const managersResult = await pool.query(managersQuery, [emailDomain, fullAlert.province_id]);
-                
-                recipientEmails = managersResult.rows
-                    .map(row => {
-                        let email = row.email;
-                        if (!email) return null;
-                        const parts = email.split('@');
-                        if (parts.length > 2) {
-                            const firstPart = parts[0];
-                            const lastPart = parts[parts.length - 1];
-                            if (lastPart === emailDomain) {
-                                email = parts.slice(0, -1).join('@');
-                            } else {
-                                email = `${firstPart}@${lastPart}`;
-                            }
-                        }
-                        if (email && email.includes('@') && email.indexOf('@') === email.lastIndexOf('@')) {
-                            return email;
-                        }
-                        return null;
-                    })
-                    .filter(email => email && email.includes('@'));
+                recipientEmails = await getAlertRecipientEmailsByProvince(fullAlert.province_id);
             } catch (error) {
-                console.error('[DeviceMonitor] Lỗi khi lấy danh sách người quản lý:', error);
+                console.error('[DeviceMonitor] Lỗi khi lấy danh sách người nhận:', error);
             }
         }
 
@@ -201,11 +160,11 @@ const createOfflineAlert = async (device) => {
             }
         }
 
-        if (recipientEmails.length > 0) {
-            sendAlertEmail(recipientEmails, fullAlert).catch(error => {
-                console.error('[DeviceMonitor] Lỗi khi gửi email cảnh báo:', error);
-            });
-        }
+        // if (recipientEmails.length > 0) {
+        //     sendAlertEmail(recipientEmails, fullAlert).catch(error => {
+        //         console.error('[DeviceMonitor] Lỗi khi gửi email cảnh báo:', error);
+        //     });
+        // }
 
         // Emit socket event
         if (io) {

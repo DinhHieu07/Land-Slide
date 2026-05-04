@@ -59,16 +59,16 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 def load_env() -> None:
-    env_path = ROOT.parent / "backend" / ".env"
-    if env_path.is_file():
-        load_dotenv(env_path)
+    ml_env_path = ROOT / ".env"
+    if ml_env_path.is_file():
+        load_dotenv(ml_env_path)
     else:
         load_dotenv()
 
 def load_dataset() -> pd.DataFrame:
     url = os.environ.get("DATABASE_URL")
     if not url:
-        raise SystemExit("Thiếu DATABASE_URL. Cấu hình trong backend/.env")
+        raise SystemExit("Thiếu DATABASE_URL. Cấu hình trong ml/.env")
 
     if url.startswith("postgresql://") and "+psycopg2" not in url:
         url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
@@ -190,34 +190,26 @@ def main() -> None:
     label_order = ["SAFE", "WARNING", "DANGER"]
     n = len(df)
 
-    # tr_sl, va_sl, te_sl = temporal_split_indices(n, args.train_ratio, args.val_ratio)
+    tr_sl, va_sl, te_sl = temporal_split_indices(n, args.train_ratio, args.val_ratio)
 
-    # if tr_sl.stop == 0:
-    #     X_train, X_tmp, y_train, y_tmp = train_test_split(
-    #         X, y, test_size=0.3, random_state=42, stratify=y
-    #     )
-    #     X_val, X_test, y_val, y_test = train_test_split(
-    #         X_tmp, y_tmp, test_size=0.5, random_state=42, stratify=y_tmp
-    #     )
-    # else:
-    #     X_train, y_train = X.iloc[tr_sl], y.iloc[tr_sl]
-    #     X_val, y_val = X.iloc[va_sl], y.iloc[va_sl]
-    #     X_test, y_test = X.iloc[te_sl], y.iloc[te_sl]
-    #     print(
-    #         f"[train] Chia theo thời gian: train={len(y_train)}, val={len(y_val)}, test={len(y_test)}"
-    #     )
-    
-    # 750 dòng đầu: Test (ưu tiên real)
-    X_test = X.iloc[:750]
-    y_test = y.iloc[:750]
-
-    # 750 dòng tiếp: Validation
-    X_val = X.iloc[750:1500]
-    y_val = y.iloc[750:1500]
-
-    # 3500 dòng còn lại: Train
-    X_train = X.iloc[1500:]
-    y_train = y.iloc[1500:]
+    if tr_sl.stop == 0:
+        X_train, X_tmp, y_train, y_tmp = train_test_split(
+            X, y, test_size=0.3, random_state=42, stratify=y
+        )
+        X_val, X_test, y_val, y_test = train_test_split(
+            X_tmp, y_tmp, test_size=0.5, random_state=42, stratify=y_tmp
+        )
+        print(
+            f"[train] Chia fallback stratified: train={len(y_train)}, val={len(y_val)}, test={len(y_test)}"
+        )
+    else:
+        # Chia theo thời gian: train (đầu) -> val (giữa) -> test (cuối)
+        X_train, y_train = X.iloc[tr_sl], y.iloc[tr_sl]
+        X_val, y_val = X.iloc[va_sl], y.iloc[va_sl]
+        X_test, y_test = X.iloc[te_sl], y.iloc[te_sl]
+        print(
+            f"[train] Chia theo thời gian: train={len(y_train)}, val={len(y_val)}, test={len(y_test)}"
+        )
 
     print(f"[train] Bài học (Train): {len(y_train)} dòng")
     print(f"[train] Thi thử (Val)  : {len(y_val)} dòng")
@@ -267,8 +259,7 @@ def main() -> None:
         "n_train": int(len(y_train)),
         "n_val": int(len(y_val)),
         "n_test": int(len(y_test)),
-        # "split": "temporal" if tr_sl.stop else "stratified_fallback",
-        "split": "custom_real_data_500",
+        "split": "stratified_fallback" if tr_sl.stop == 0 else "temporal",
         "train_ratio": args.train_ratio,
         "val_ratio": args.val_ratio,
         "features": feature_cols,

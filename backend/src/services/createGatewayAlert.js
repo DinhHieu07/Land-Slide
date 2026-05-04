@@ -1,5 +1,6 @@
 const pool = require('../config/db');
-const sendAlertEmail = require('./emailService');
+const { sendAlertEmail } = require('./emailService');
+const { getAlertRecipientEmailsByProvince } = require('./alertRecipientsService');
 
 function toMinutes(value, fallback) {
     const n = Number(value);
@@ -42,39 +43,8 @@ async function shouldSkipByCooldown(deviceDbId, nodeId, level) {
     return elapsedMinutes < cooldownMinutes;
 }
 
-function buildManagersEmailQuery() {
-    return `
-        SELECT DISTINCT
-            u.id,
-            u.username,
-            u.role,
-            (u.username || '@' || $1::text) as email
-        FROM users u
-         JOIN user_provinces up ON u.id = up.user_id
-        WHERE up.province_id = $2
-        UNION
-        SELECT
-            id,
-            username,
-            role,
-            (username || '@' || $1::text) as email
-        FROM users
-        WHERE role = 'superAdmin'
-    `;
-}
-
 async function getRecipientEmailsByProvince(provinceId) {
-    if (!provinceId) {
-        return [];
-    }
-
-    const emailDomain = process.env.EMAIL_DOMAIN || 'https://land-slide.vercel.app';
-    const managersQuery = buildManagersEmailQuery();
-    const managersResult = await pool.query(managersQuery, [emailDomain, provinceId]);
-
-    return managersResult.rows
-        .map((row) => row.email)
-        .filter((email) => email && email.includes('@') && email.indexOf('@') === email.lastIndexOf('@'));
+    return getAlertRecipientEmailsByProvince(provinceId);
 }
 
 async function notifyAlertByEmail(fullAlert) {

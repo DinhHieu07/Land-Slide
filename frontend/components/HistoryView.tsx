@@ -966,6 +966,7 @@ export default function HistoryView() {
                                 <table className="min-w-full text-sm">
                                     <thead className="bg-gray-50">
                                         <tr>
+                                            <th className="px-4 py-3 text-left font-semibold">ID</th>
                                             <th className="px-4 py-3 text-left font-semibold">Cảm biến</th>
                                             <th className="px-4 py-3 text-left font-semibold">Thiết bị quản lý</th>
                                             <th className="px-4 py-3 text-left font-semibold">Giá trị đo</th>
@@ -993,6 +994,7 @@ export default function HistoryView() {
                                                 const meta = dataLabels[item.sensor_type] || { label: item.sensor_type, unit: "" };
                                                 return (
                                                     <tr key={item.id} className="border-t">
+                                                        <td className="px-4 py-3">{item.id}</td>
                                                         <td className="px-4 py-3">
                                                             <div className="font-medium">{item.sensor_name || meta.label}</div>
                                                             <div className="text-xs text-muted-foreground">

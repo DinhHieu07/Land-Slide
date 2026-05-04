@@ -9,8 +9,12 @@ import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
+
+load_dotenv(ROOT / ".env")
+
 ARTIFACTS_DIR = Path(os.getenv("ML_ARTIFACTS_DIR", str(ROOT / "artifacts")))
 MODEL_PATH = ARTIFACTS_DIR / "alert_rf.joblib"
 LABEL_MAP_PATH = ARTIFACTS_DIR / "label_map.json"

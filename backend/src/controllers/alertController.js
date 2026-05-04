@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { sendAlertEmail } = require('../services/emailService');
+const { getAlertRecipientEmailsByProvince } = require('../services/alertRecipientsService');
 
 function getHeatmapWeight(row) {
     const alertLevel = Number(row.alert_level || 0);
@@ -355,98 +356,13 @@ const createAlert = async (req, res) => {
         
         if (fullAlert.province_id) {
             try {
-                // Kiểm tra xem bảng users có cột email không
-                const checkEmailColumn = await pool.query(`
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name = 'email'
-                `);
-                
-                const hasEmailColumn = checkEmailColumn.rows.length > 0;
-                const emailDomain = process.env.EMAIL_DOMAIN || 'landslide-monitoring.com';
-                
-                // Lấy danh sách users quản lý tỉnh thành này
-                let managersQuery;
-                let queryParams;
-                
-                if (hasEmailColumn) {
-                    // Sử dụng CAST để PostgreSQL xác định kiểu dữ liệu
-                    managersQuery = `
-                        SELECT DISTINCT 
-                            u.id,
-                            u.username,
-                            u.role,
-                            COALESCE(u.email, u.username || '@' || $1::text) as email
-                        FROM users u
-                         JOIN user_provinces up ON u.id = up.user_id
-                        WHERE up.province_id = $2
-                        UNION
-                        SELECT 
-                            id,
-                            username,
-                            role,
-                            COALESCE(email, username || '@' || $1::text) as email
-                        FROM users
-                        WHERE role = 'superAdmin'
-                    `;
-                } else {
-                    // Nếu không có cột email, tạo email từ username
-                    managersQuery = `
-                        SELECT DISTINCT 
-                            u.id,
-                            u.username,
-                            u.role,
-                            (u.username || '@' || $1::text) as email
-                        FROM users u
-                         JOIN user_provinces up ON u.id = up.user_id
-                        WHERE up.province_id = $2
-                        UNION
-                        SELECT 
-                            id,
-                            username,
-                            role,
-                            (username || '@' || $1::text) as email
-                        FROM users
-                        WHERE role = 'superAdmin'
-                    `;
-                }
-                
-                queryParams = [emailDomain, fullAlert.province_id];
-                const managersResult = await pool.query(managersQuery, queryParams);
-                
-                // Lọc và làm sạch email: chỉ lấy email hợp lệ và không bị duplicate domain
-                recipientEmails = managersResult.rows
-                    .map(row => {
-                        let email = row.email;
-                        if (!email) return null;
-                        
-                        // Kiểm tra xem email có bị duplicate domain không (ví dụ: email@domain@domain)
-                        const parts = email.split('@');
-                        if (parts.length > 2) {
-                            const firstPart = parts[0];
-                            const lastPart = parts[parts.length - 1];
-                            
-                            // Nếu phần cuối là domain mặc định của chúng ta, bỏ nó đi
-                            if (lastPart === emailDomain) {
-                                // Ghép lại từ phần đầu đến phần trước domain mặc định
-                                email = parts.slice(0, -1).join('@');
-                            } else {
-                                // Nếu không phải domain mặc định, lấy phần đầu và phần cuối
-                                email = `${firstPart}@${lastPart}`;
-                            }
-                        }
-                        
-                        // Kiểm tra email hợp lệ: phải có đúng 1 dấu @
-                        if (email && email.includes('@') && email.indexOf('@') === email.lastIndexOf('@')) {
-                            return email;
-                        }
-                        return null;
-                    })
-                    .filter(email => email && email.includes('@')); // Chỉ lấy email hợp lệ
-                
-                console.log(`Tìm thấy ${recipientEmails.length} người quản lý cho tỉnh thành ID ${fullAlert.province_id}:`, recipientEmails);
+                recipientEmails = await getAlertRecipientEmailsByProvince(fullAlert.province_id);
+                console.log(
+                    `Tìm thấy ${recipientEmails.length} người nhận cho tỉnh thành ID ${fullAlert.province_id}:`,
+                    recipientEmails
+                );
             } catch (error) {
-                console.error('Lỗi khi lấy danh sách người quản lý:', error);
+                console.error('Lỗi khi lấy danh sách người nhận:', error);
             }
         }
         

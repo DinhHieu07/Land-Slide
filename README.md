@@ -150,8 +150,6 @@ SENDGRID_FROM_EMAIL=...
 ALERT_EMAIL_RECIPIENT=...
 ```
 
-Gửi email cảnh báo qua SendGrid đã có `emailService.js`; lời gọi gửi mail trong `createGatewayAlert.js` hiện đang comment — bật lại khi cần.
-
 ## Machine learning (`ml/`)
 
 - **Huấn luyện:** `train_alert_rf.py` — Random Forest, đọc `public.dataset` từ PostgreSQL (`DATABASE_URL` trong `ml/.env`).

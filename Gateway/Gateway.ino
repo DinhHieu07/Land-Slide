@@ -19,6 +19,19 @@ unsigned long rainWarningStart = 0;
 unsigned long rainDangerStart = 0;
 const char* deviceID = "HG-GW001";
 
+// Node disconnect tracking
+#define NODE_DISCONNECT_TIMEOUT 1800000 // 30 phút = 30 * 60 * 1000 ms
+#define MAX_NODES 20
+
+struct NodeStatus {
+  String nodeID;
+  unsigned long lastHeartbeat;
+  bool isConnected;
+};
+
+NodeStatus nodeStatuses[MAX_NODES];
+int nodeCount = 0;
+
 const char* ssid = "iPhone";
 const char* password = "30072004";
 
@@ -45,6 +58,63 @@ String sha256(String input) {
     result += str;
   }
   return result;
+}
+
+// Hàm cập nhật trạng thái Node
+void updateNodeHeartbeat(String nodeID) {
+  for (int i = 0; i < nodeCount; i++) {
+    if (nodeStatuses[i].nodeID == nodeID) {
+      nodeStatuses[i].lastHeartbeat = millis();
+      if (!nodeStatuses[i].isConnected) {
+        nodeStatuses[i].isConnected = true;
+        Serial.printf("Node %s: RECONNECTED\n", nodeID.c_str());
+      }
+      return;
+    }
+  }
+  
+  // Node mới, thêm vào danh sách
+  if (nodeCount < MAX_NODES) {
+    nodeStatuses[nodeCount].nodeID = nodeID;
+    nodeStatuses[nodeCount].lastHeartbeat = millis();
+    nodeStatuses[nodeCount].isConnected = true;
+    nodeCount++;
+    Serial.printf("Node %s: REGISTERED\n", nodeID.c_str());
+  }
+}
+
+// Hàm kiểm tra Node nào đã disconnect
+void checkNodeDisconnect() {
+  unsigned long currentTime = millis();
+  
+  for (int i = 0; i < nodeCount; i++) {
+    if (nodeStatuses[i].isConnected) {
+      // Nếu đã qua 30 phút không nhận dữ liệu
+      if (currentTime - nodeStatuses[i].lastHeartbeat >= NODE_DISCONNECT_TIMEOUT) {
+        nodeStatuses[i].isConnected = false;
+        Serial.printf("Node %s: DISCONNECTED (timeout)\n", nodeStatuses[i].nodeID.c_str());
+        
+        // Gửi thông báo disconnect
+        sendDisconnectNotification(nodeStatuses[i].nodeID);
+      }
+    }
+  }
+}
+
+// Hàm gửi thông báo disconnect qua MQTT
+void sendDisconnectNotification(String nodeID) {
+  String topic = "landslide/" + String(deviceID) + "/data";
+  
+  String payload = "{";
+  payload += "\"device\":\"" + String(deviceID) + "\",";
+  payload += "\"node\":\"" + nodeID + "\",";
+  payload += "\"status\":\"disconnected\",";
+  payload += "\"timestamp\":" + String(millis());
+  payload += "}";
+  
+  client.publish(topic.c_str(), payload.c_str());
+  
+  Serial.println("MQTT Disconnect Alert: " + payload);
 }
 
 void setup_wifi() {
@@ -97,6 +167,9 @@ void loop() {
     reconnect();
   }
   client.loop();
+  
+  // Kiểm tra Node nào đã disconnect
+  checkNodeDisconnect();
 
   int packetSize = LoRa.parsePacket();
 
@@ -125,6 +198,10 @@ void loop() {
 
     if (nodeIDStr && rainStr && soilStr && tiltStr && vibStr && sigStr) {
       String nodeID = String(nodeIDStr);
+            
+      // Cập nhật heartbeat cho Node này
+      updateNodeHeartbeat(nodeID);
+      
       int rainPercent = atoi(rainStr);
       int soilPercent = atoi(soilStr);
       float tilt = atof(tiltStr);
@@ -203,19 +280,20 @@ void loop() {
       Serial.printf("Node: %s | Cảnh báo mức: %d\n", nodeID.c_str(), alertLevel);
       String topic = "landslide/" + String(deviceID) + "/data";
 
-      String payload = "{";
-      payload += "\"device\":\"" + String(deviceID) + "\",";
-      payload += "\"node\":\"" + nodeID + "\",";
-      payload += "\"rain\":" + String(rainPercent) + ",";
-      payload += "\"soil\":" + String(soilPercent) + ",";
-      payload += "\"tilt\":" + String(tilt) + ",";
-      payload += "\"vibration\":" + String(vibrationCount) + ",";
-      payload += "\"alert\":" + String(alertLevel);
-      payload += "}";
+      String mqttPayload = "{";
+      mqttPayload += "\"device\":\"" + String(deviceID) + "\",";
+      mqttPayload += "\"node\":\"" + nodeID + "\",";
+      mqttPayload += "\"rain\":" + String(rainPercent) + ",";
+      mqttPayload += "\"soil\":" + String(soilPercent) + ",";
+      mqttPayload += "\"tilt\":" + String(tilt) + ",";
+      mqttPayload += "\"vibration\":" + String(vibrationCount) + ",";
+      mqttPayload += "\"alert\":" + String(alertLevel) + ",";
+      mqttPayload += "\"status\":\"connected\"";
+      mqttPayload += "}";
 
-      client.publish(topic.c_str(), payload.c_str());
+      client.publish(topic.c_str(), mqttPayload.c_str());
 
-      Serial.println("MQTT Sent: " + payload);
+      Serial.println("MQTT Sent: " + mqttPayload);
     } else {
       Serial.println("Lỗi: Dữ liệu gửi đến bị sai định dạng!");
     }

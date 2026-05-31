@@ -97,6 +97,33 @@ async function tryUpdateNodeState(deviceCode, nodeId, sensorType, sensorUnit, va
     }
 }
 
+// Hàm cập nhật trạng thái Node khi nhận disconnect
+async function handleNodeDisconnect(deviceCode, nodeId, io = null) {
+    if (!deviceCode || !nodeId) {
+        console.warn('[MQTT] Thiếu deviceCode hoặc nodeId để xử lý disconnect');
+        return;
+    }
+
+    try {
+        // Cập nhật trạng thái Node thành 'disconnected'
+        const updateQuery = `
+            UPDATE nodes n
+            SET
+                status = 'disconnected',
+                updated_at = NOW()
+            FROM devices d
+            WHERE n.device_id = d.id
+              AND d.device_id = $1
+              AND n.node_id = $2
+            RETURNING n.id, n.node_id, n.status
+        `;
+
+        const result = await pool.query(updateQuery, [deviceCode, nodeId]);
+    } catch (error) {
+        console.error(`[DISCONNECT_ERROR] Lỗi khi xử lý Node disconnect:`, error);
+    }
+}
+
 // Hàm xử lý dữ liệu cảm biến từ MQTT
 const processSensorReading = async (deviceId, nodeId, sensorCode, value, timestamp, io = null) => {
     try {
@@ -281,6 +308,13 @@ const initMqttSubscriber = (io) => {
             }
             
             const nodeId = data.node;
+
+            // Kiểm tra nếu là thông báo disconnect
+            if (data.status === 'disconnected') {
+                console.log(`[MQTT] Nhận được thông báo disconnect từ Node ${nodeId}`);
+                await handleNodeDisconnect(deviceCode, nodeId, io);
+                return;
+            }
 
             const sensorDatas = {
                 rain: data.rain,

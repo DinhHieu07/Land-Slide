@@ -86,19 +86,19 @@ JWT access token + refresh token (cookie httpOnly). API `/api/auth/*`.
 
 ### API chính (prefix `/api`)
 
-| Nhóm | Route | Ghi chú |
-|------|-------|---------|
-| Auth | `/auth/login`, `/register`, `/refresh-token`, `/logout`, `/me`, đổi/quên mật khẩu, yêu cầu tỉnh | |
-| Dashboard | `/dashboard/stats`, `/sensor-stats`, `/sensor-stats-by-device`, `/sensor-stats-by-area` | Admin+ |
-| Devices | `/devices` CRUD | User xem; admin sửa |
-| Nodes | `/nodes/map`, `/nodes/by-gateway/:id`, CRUD | |
-| Sensors | `/sensors/by-device/:id`, `/sensors/by-node/:id`, `/sensors/:id/threshold` | |
-| Alerts | `/alerts`, `/alerts/stats`, `/alerts/heatmap`, `/alerts/:id/status` | |
-| History | `/history/alerts`, `/history/sensor-data` | Admin+ |
-| Accounts | `/accounts/*`, duyệt `province-requests` | Super admin / admin |
-| Events | `/events/*` | Sự kiện sạt lở (bản đồ, lịch sử) |
-| Areas | `/areas/*` | Khu vực |
-| Provinces | `/provinces/public`, `/provinces/list-provinces/:username` | |
+| Nhóm | Route |
+|------|-------|
+| Auth | `/auth/login`, `/register`, `/refresh-token`, `/logout`, `/me`, đổi/quên mật khẩu, yêu cầu tỉnh |
+| Dashboard | `/dashboard/stats`, `/sensor-stats`, `/sensor-stats-by-device`, `/sensor-stats-by-area` |
+| Devices | `/devices` CRUD |
+| Nodes | `/nodes/map`, `/nodes/by-gateway/:id`, CRUD |
+| Sensors | `/sensors/by-device/:id`, `/sensors/by-node/:id`, `/sensors/:id/threshold` |
+| Alerts | `/alerts`, `/alerts/stats`, `/alerts/heatmap`, `/alerts/:id/status` |
+| History | `/history/alerts`, `/history/sensor-data` |
+| Accounts | `/accounts/*`, duyệt `province-requests` |
+| Events | `/events/*` | 
+| Areas | `/areas/*` | 
+| Provinces | `/provinces/public`, `/provinces/list-provinces/:username` |
 
 ### Socket.io events
 
@@ -149,8 +149,6 @@ SENDGRID_API_KEY=...
 SENDGRID_FROM_EMAIL=...
 ALERT_EMAIL_RECIPIENT=...
 ```
-
-Gửi email cảnh báo qua SendGrid đã có `emailService.js`; lời gọi gửi mail trong `createGatewayAlert.js` hiện đang comment — bật lại khi cần.
 
 ## Machine learning (`ml/`)
 
@@ -250,13 +248,6 @@ LandSlide/
 │   └── train_alert_rf.py
 └── README.md
 ```
-
-## Ghi chú vận hành
-
-- Demo frontend có thể deploy Vercel; backend và ML cần host riêng cùng PostgreSQL, Redis, MQTT.
-- Không commit file `.env` (đã có trong `.gitignore`). Firmware mẫu có chỗ điền WiFi/MQTT — thay bằng credential thật trước khi đưa vào git công khai.
-- Mức cảnh báo trên gateway và trong `simulatorGateway2.js` dùng cùng bộ quy tắc; ML bổ sung lớp học từ dữ liệu lịch sử trong `dataset`.
-- User thường chỉ thấy dữ liệu thuộc tỉnh đã được admin duyệt (`user_provinces` / `user_province_requests`).
 
 ## Tác giả
 

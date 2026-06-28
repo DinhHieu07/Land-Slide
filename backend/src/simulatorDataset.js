@@ -1,7 +1,7 @@
 require('dotenv').config();
 const pool = require('./config/db');
 
-const totalRows = Math.max(1, parseInt(process.env.SIMULATOR_DATASET_TOTAL_ROWS || '3000', 10) || 1000);
+const totalRows = Math.max(1, parseInt(process.env.SIMULATOR_DATASET_TOTAL_ROWS || '7000', 10) || 10000);
 const nodeId = (process.env.SIMULATOR_DATASET_NODE_ID || 'NODE1').trim();
 const intervalSeconds = Math.max(1, parseInt(process.env.SIMULATOR_DATASET_INTERVAL_SECONDS || '5', 10) || 5);
 const startTimeText = process.env.SIMULATOR_DATASET_START_AT || null;

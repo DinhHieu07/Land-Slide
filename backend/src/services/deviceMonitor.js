@@ -160,11 +160,11 @@ const createOfflineAlert = async (device) => {
             }
         }
 
-        // if (recipientEmails.length > 0) {
-        //     sendAlertEmail(recipientEmails, fullAlert).catch(error => {
-        //         console.error('[DeviceMonitor] Lỗi khi gửi email cảnh báo:', error);
-        //     });
-        // }
+        if (recipientEmails.length > 0) {
+            sendAlertEmail(recipientEmails, fullAlert).catch(error => {
+                console.error('[DeviceMonitor] Lỗi khi gửi email cảnh báo:', error);
+            });
+        }
 
         // Emit socket event
         if (io) {

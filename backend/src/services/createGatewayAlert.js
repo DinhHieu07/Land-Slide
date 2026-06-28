@@ -61,7 +61,7 @@ async function notifyAlertByEmail(fullAlert) {
         }
 
         if (recipientEmails.length > 0) {
-            // await sendAlertEmail(recipientEmails, fullAlert);
+            await sendAlertEmail(recipientEmails, fullAlert);
         }
     } catch (error) {
         console.error('Loi gui email canh bao:', error);

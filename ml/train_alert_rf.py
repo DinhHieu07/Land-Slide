@@ -98,17 +98,33 @@ def build_feature_columns(df: pd.DataFrame, include_rain_elapsed: bool) -> list[
     return cols
 
 def temporal_split_indices(n: int, train_r: float, val_r: float) -> tuple[slice, slice, slice]:
-    #Chia tổng dữ liệu thành 3 đoạn liên tiếp theo thời gian: train | validation | test
+    # Chia dữ liệu theo thời gian nhưng lấy tập train từ dưới lên:
+    # test (đầu) | validation (giữa) | train (cuối)
+
     if train_r <= 0 or val_r <= 0 or train_r + val_r >= 1:
         raise SystemExit("train_ratio + val_ratio phải < 1 và đều dương.")
+
     n_train = int(n * train_r)
     n_val = int(n * val_r)
-    if n_train < 50 or (n - n_train - n_val) < 20:
-        return slice(0, 0), slice(0, 0), slice(0, 0)  # báo hiệu dùng fallback
     n_test = n - n_train - n_val
-    if n_test < 10:
-        return slice(0, 0), slice(0, 0), slice(0, 0)
-    return slice(0, n_train), slice(n_train, n_train + n_val), slice(n_train + n_val, n)
+
+    if n_train < 50 or n_test < 20 or n_val < 20:
+        return slice(0, 0), slice(0, 0), slice(0, 0)  # báo hiệu dùng fallback
+
+    test_start = 0
+    test_end = n_test
+
+    val_start = test_end
+    val_end = val_start + n_val
+
+    train_start = val_end
+    train_end = n
+
+    return (
+        slice(train_start, train_end),  
+        slice(val_start, val_end),      
+        slice(test_start, test_end),    
+    )
 
 def prepare_labels(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     # Chuẩn hóa nhãn chữ HOA; bỏ dòng không phải SAFE/WARNING/DANGER

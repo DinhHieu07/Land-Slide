@@ -13,7 +13,7 @@
     "WARNING",
     "DANGER"
   ],
-  "trained_at_utc": "2026-05-04T11:35:26.307482+00:00",
+  "trained_at_utc": "2026-06-08T15:18:37.716696+00:00",
   "sklearn_version": "1.5.2",
   "include_rain_elapsed": true
 }

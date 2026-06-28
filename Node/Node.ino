@@ -21,6 +21,9 @@
 
 #define SECRET_KEY "secret_key"
 
+#define ACTIVE_MEASURE_TIME_MS 2000
+#define SLEEP_TIME_SECONDS 295
+
 Adafruit_MPU6050 mpu;
 
 String sha256(String input) {
@@ -34,6 +37,16 @@ String sha256(String input) {
     result += str;
   }
   return result;
+}
+
+void goToDeepSleep() {
+  Serial.println("Going to deep sleep...");
+  Serial.flush();
+
+  LoRa.sleep();
+
+  esp_sleep_enable_timer_wakeup((uint64_t)SLEEP_TIME_SECONDS * 1000000ULL);
+  esp_deep_sleep_start();
 }
 
 void setup() {
@@ -71,7 +84,7 @@ void loop() {
   unsigned long startTime = millis();
   unsigned long lastTrigger = 0;
 
-  while (millis() - startTime < 2000) {
+  while (millis() - startTime < ACTIVE_MEASURE_TIME_MS) {
     int val = digitalRead(VIBRATION_SENSOR);
 
     if (val == 1 && millis() - lastTrigger > 100) {
@@ -114,4 +127,6 @@ void loop() {
   LoRa.endPacket();
 
   delay(3000);
+  
+  //goToDeepSleep();
 }
